@@ -2,6 +2,18 @@
   "type": "object",
   "title": "extractor configuration",
   "properties": {
+    "marketplace_id": {
+      "type": "string",
+      "title": "Amazon Marketplace ID",
+      "propertyOrder": 4,
+      "links": [
+        {
+          "href": "https://developer-docs.amazon.com/sp-api/docs/marketplace-ids"
+        }
+    ]
+  
+  }
+    },
     "#refresh_token": {
       "type": "string",
       "title": "Amazon Refresh Token",
@@ -27,4 +39,3 @@
       ]
     }
   }
-}
