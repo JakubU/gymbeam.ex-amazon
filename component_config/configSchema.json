@@ -1,19 +1,30 @@
 {
   "type": "object",
   "title": "extractor configuration",
-  "required": [
-    "print_hello"
-  ],
   "properties": {
-    "print_hello": {
-      "type": "boolean",
-      "title": "Print Hello",
+    "#refresh_token": {
+      "type": "string",
+      "title": "Amazon Refresh Token",
+      "format": "password",
       "propertyOrder": 1
     },
-    "debug": {
-      "type": "boolean",
-      "title": "Debug",
+    "#app_id": {
+      "type": "string",
+      "title": "LWA App ID",
+      "format": "password",
       "propertyOrder": 2
+    },
+    "#client_secret_id": {
+      "type": "string",
+      "title": "LWA Client ID",
+      "format": "password",
+      "propertyOrder": 3,
+      "links": [
+        {
+          "rel": "Amazon Selling Partner API Documentation",
+          "href": "https://developer-docs.amazon.com/sp-api/docs/connecting-to-the-selling-partner-api?ld=NSGoogle"
+        }
+      ]
     }
   }
 }
