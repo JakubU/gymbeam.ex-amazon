@@ -7,6 +7,11 @@
       "title": "Amazon Marketplace ID",
       "propertyOrder": 1
     },
+    "date_range": {
+      "type": "string",
+      "title": "Date Range",
+      "propertyOrder": 1
+    },
   "#refresh_token": {
     "type": "string",
     "title": "Amazon Refresh Token",
