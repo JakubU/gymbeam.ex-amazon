@@ -1,21 +1,20 @@
-"""
-Template Component main class.
-
-"""
 import csv
 import logging
+import requests
 from datetime import datetime
-
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
 
 # configuration variables
-KEY_API_TOKEN = '#api_token'
-KEY_PRINT_HELLO = 'print_hello'
+KEY_REFRESH_TOKEN = '#refresh_token'
+KEY_APP_ID = '#app_id'
+KEY_CLIENT_SECRET_ID = '#client_secret_id'
+KEY_MARKETPLACE_ID = 'marketplace_id'
+
 
 # list of mandatory parameters => if some is missing,
 # component will fail with readable message on initialization.
-REQUIRED_PARAMETERS = [KEY_PRINT_HELLO]
+REQUIRED_PARAMETERS = []
 REQUIRED_IMAGE_PARS = []
 
 
@@ -43,45 +42,33 @@ class Component(ComponentBase):
         self.validate_configuration_parameters(REQUIRED_PARAMETERS)
         self.validate_image_parameters(REQUIRED_IMAGE_PARS)
         params = self.configuration.parameters
-        # Access parameters in data/config.json
-        if params.get(KEY_PRINT_HELLO):
-            logging.info("Hello World")
 
-        # get input table definitions
-        input_tables = self.get_input_tables_definitions()
-        for table in input_tables:
-            logging.info(f'Received input table: {table.name} with path: {table.full_path}')
-
-        if len(input_tables) == 0:
-            raise UserException("No input tables found")
+        self.refresh_token = params.get(KEY_REFRESH_TOKEN)
+        self.app_id = params.get(KEY_APP_ID)
+        self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
+        self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
 
         # get last state data/in/state.json from previous run
         previous_state = self.get_state_file()
         logging.info(previous_state.get('some_state_parameter'))
 
+        # Refresh the Amazon token at the beginning of the run
+        self.refresh_amazon_token()
+        
+            # Fetch orders updated after a specific date
+        orders = self.fetch_orders("2023-01-26T12:30:00Z")
+        if orders:
+            print("Fetched orders:", orders)
+        else:
+            print("Failed to fetch orders.")
+        
         # Create output table (Tabledefinition - just metadata)
-        table = self.create_out_table_definition('output.csv', incremental=True, primary_key=['timestamp'])
+        table = self.create_out_table_definition(
+            'output.csv', incremental=True, primary_key=['timestamp'])
 
         # get file path of the table (data/out/tables/Features.csv)
         out_table_path = table.full_path
         logging.info(out_table_path)
-
-        # Add timestamp column and save into out_table_path
-        input_table = input_tables[0]
-        with (open(input_table.full_path, 'r') as inp_file,
-              open(table.full_path, mode='wt', encoding='utf-8', newline='') as out_file):
-            reader = csv.DictReader(inp_file)
-
-            columns = list(reader.fieldnames)
-            # append timestamp
-            columns.append('timestamp')
-
-            # write result with column added
-            writer = csv.DictWriter(out_file, fieldnames=columns)
-            writer.writeheader()
-            for in_row in reader:
-                in_row['timestamp'] = datetime.now().isoformat()
-                writer.writerow(in_row)
 
         # Save table manifest (output.csv.manifest) from the tabledefinition
         self.write_manifest(table)
@@ -91,10 +78,74 @@ class Component(ComponentBase):
 
         # ####### EXAMPLE TO REMOVE END
 
+    def refresh_amazon_token(self):
+        # Amazon token endpoint
+        url = "https://api.amazon.com/auth/o2/token"
 
-"""
-        Main entrypoint
-"""
+        # Request payload
+        payload = {
+            'grant_type': 'refresh_token',
+            'refresh_token': self.refresh_token,
+            'client_id': self.app_id,
+            'client_secret': self.client_secret_id
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+
+        try:
+            # POST request with data encoded in URL format
+            response = requests.post(url, data=payload, headers=headers)
+            response.raise_for_status()  # Raises an HTTPError for bad responses
+
+            # Handle response
+            if response.status_code == 200:
+                logging.info("Token refreshed successfully")
+                json_data = response.json()
+                self.access_token = json_data.get("access_token")
+                # Further processing with response data here, if needed
+            else:
+                logging.error(
+                    f"Failed to refresh token: {response.status_code} - {response.text}")
+        except requests.exceptions.RequestException as e:
+            # Log any error that occurred during the request
+            logging.error(f"Error during token refresh: {str(e)}")
+            
+    def fetch_orders(self, last_update_after):
+        """
+        Fetches orders from the Amazon Selling Partner API using the LastUpdateDate as a filter.
+
+        :param last_update_after: ISO 8601 format date string to filter orders updated after this date.
+        """
+        # API endpoint for fetching orders
+        base_url = "https://sellingpartnerapi-eu.amazon.com/orders/v0/orders"
+        url = f"{base_url}?LastUpdatedAfter={last_update_after}&MarketplaceIds={self.marketplace_id}"
+
+        # Check if access_token and marketplace_id are available
+        if not hasattr(self, 'access_token') or not self.marketplace_id:
+            logging.error("Access token or marketplace ID is not available.")
+            return
+
+        # Prepare headers with the access token
+        headers = {
+            'Accept': 'application/json',
+            'x-amz-access-token': self.access_token
+        }
+
+        # Make the GET request
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Raises an HTTPError for bad responses
+            # Process the response
+            orders_data = response.json()
+            logging.info("Orders fetched successfully.")
+            return orders_data
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error fetching orders: {str(e)}")
+            return None
+
+
+
 if __name__ == "__main__":
     try:
         comp = Component()
