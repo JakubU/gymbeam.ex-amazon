@@ -10,7 +10,8 @@
     "date_range": {
       "type": "string",
       "title": "Date Range",
-      "propertyOrder": 1
+      "description": "Enter the date range as a number of days. This field specifies the duration from today back to the number of days you enter. For example, if you input '7', it will retrieve data from the past week up to today.",
+      "propertyOrder": 5
     },
   "#refresh_token": {
     "type": "string",

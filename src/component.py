@@ -4,12 +4,15 @@ import requests
 from datetime import datetime
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
+from datetime import datetime, timedelta
+
 
 # configuration variables
 KEY_REFRESH_TOKEN = '#refresh_token'
 KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
 KEY_MARKETPLACE_ID = 'marketplace_id'
+KEY_DATE_RANGE = 'date_range'
 
 
 # list of mandatory parameters => if some is missing,
@@ -31,6 +34,14 @@ class Component(ComponentBase):
 
     def __init__(self):
         super().__init__()
+    
+    @staticmethod
+    def get_date_x_days_ago(num_days):
+        """
+        Returns a date that is `num_days` ago from today in ISO 8601 format.
+        """
+        date_x_days_ago = datetime.utcnow() - timedelta(days=num_days)
+        return date_x_days_ago.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     def run(self):
         """
@@ -47,6 +58,8 @@ class Component(ComponentBase):
         self.app_id = params.get(KEY_APP_ID)
         self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
         self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
+        self.date_range = int(params.get(KEY_DATE_RANGE, 7))  # Default to last 7 days if not specified
+
 
         # get last state data/in/state.json from previous run
         previous_state = self.get_state_file()
@@ -55,8 +68,10 @@ class Component(ComponentBase):
         # Refresh the Amazon token at the beginning of the run
         self.refresh_amazon_token()
         
-            # Fetch orders updated after a specific date
-        orders = self.fetch_orders("2023-01-26T12:30:00Z")
+        # Fetch orders updated after a specific date computed from date_range
+        last_update_after = self.get_date_x_days_ago(self.date_range)
+        print(last_update_after)
+        orders = self.fetch_orders(last_update_after)
         if orders:
             print("Fetched orders:", orders)
         else:
@@ -110,6 +125,8 @@ class Component(ComponentBase):
         except requests.exceptions.RequestException as e:
             # Log any error that occurred during the request
             logging.error(f"Error during token refresh: {str(e)}")
+            
+
             
     def fetch_orders(self, last_update_after):
         """
