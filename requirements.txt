@@ -3,6 +3,5 @@ keboola.utils
 keboola.http-client
 mock
 freezegun
-request
+requests
 pandas
-
