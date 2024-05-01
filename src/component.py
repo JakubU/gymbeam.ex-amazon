@@ -24,6 +24,7 @@ class Component(ComponentBase):
     def __init__(self):
         super().__init__()
         self.setup_logging()
+        self.all_data = pd.DataFrame()  # Initialize an empty DataFrame to store all data
 
     def setup_logging(self):
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,6 +49,8 @@ class Component(ComponentBase):
                 report_id = self.create_report(start_date, end_date)
                 if report_id:
                     self.poll_report_status_and_download(report_id)
+            # After processing all segments, save the consolidated DataFrame to CSV
+            self.process_orders_data(self.all_data)
         else:
             logging.error("Failed to refresh token, cannot proceed with report creation.")
             
@@ -141,14 +144,14 @@ class Component(ComponentBase):
         if response.status_code == 200:
             content = gzip.decompress(response.content) if compression_algorithm == 'GZIP' else response.content
             df = pd.read_csv(io.StringIO(content.decode('utf-8')), delimiter='\t')
-            self.process_orders_data(df)
+            self.all_data = pd.concat([self.all_data, df], ignore_index=True)  # Append to the DataFrame
         else:
             logging.error("Failed to download document.")
 
     def process_orders_data(self, df):
         table = self.create_out_table_definition('output.csv', incremental=True, primary_key=['amazon-order-id', 'sku', 'asin'])
         df.to_csv(table.full_path, index=False)
-        logging.info('Data processed and written successfully.')
+        logging.info('All data processed and written successfully.')
 
 if __name__ == "__main__":
     try:
