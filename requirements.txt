@@ -5,3 +5,5 @@ mock
 freezegun
 requests
 pandas
+ratelimit
+lxml
