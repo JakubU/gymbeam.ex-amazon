@@ -359,19 +359,22 @@ class Component(ComponentBase):
                     'order_item_id': item['OrderItemId'],
                     'quantity_shipped': item['QuantityShipped']
                 }
-                for charge_type in charge_types:
-                    charge_key = f"{self.camel_to_snake(charge_type)}_amount"
-                    currency_key = f"{self.camel_to_snake(charge_type)}_currency"
-                    row[charge_key] = item['ItemChargeList'][0]['ChargeAmount']['CurrencyAmount']
-                    row[currency_key] = item['ItemChargeList'][0]['ChargeAmount']['CurrencyCode']
+                for charge in item['ItemChargeList']:
+                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
+                    charge_key = f"{charge_type_snake}_amount"
+                    currency_key = f"{charge_type_snake}_currency"
+                    row[charge_key] = charge['ChargeAmount']['CurrencyAmount']
+                    row[currency_key] = charge['ChargeAmount']['CurrencyCode']
 
-                for fee_type in fee_types:
-                    fee_key = f"{self.camel_to_snake(fee_type)}_amount"
-                    currency_key = f"{self.camel_to_snake(fee_type)}_currency"
-                    row[fee_key] = item['ItemFeeList'][0]['FeeAmount']['CurrencyAmount']
-                    row[currency_key] = item['ItemFeeList'][0]['FeeAmount']['CurrencyCode']
+                for fee in item['ItemFeeList']:
+                    fee_type_snake = self.camel_to_snake(fee['FeeType'])
+                    fee_key = f"{fee_type_snake}_amount"
+                    currency_key = f"{fee_type_snake}_currency"
+                    row[fee_key] = fee['FeeAmount']['CurrencyAmount']
+                    row[currency_key] = fee['FeeAmount']['CurrencyCode']
 
-                all_rows.append(row)  # Add row to list
+        all_rows.append(row)
+
 
         # Return DataFrame with all processed data
         return pd.DataFrame(all_rows, columns=columns)
