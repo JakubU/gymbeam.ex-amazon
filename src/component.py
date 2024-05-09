@@ -8,9 +8,12 @@ import time
 import gzip
 import io
 import json
-import os
 import xml.etree.ElementTree as ET
+import warnings
+import re
 
+# Suppress FutureWarnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # Configuration variables
 KEY_REFRESH_TOKEN = '#refresh_token'
@@ -19,15 +22,18 @@ KEY_CLIENT_SECRET_ID = '#client_secret_id'
 KEY_MARKETPLACE_ID = 'marketplace_id'
 KEY_DATE_RANGE = 'date_range'
 
+
 class Component(ComponentBase):
     def __init__(self):
         super().__init__()
         self.setup_logging()
         self.all_orders_data = pd.DataFrame()
         self.all_returns_data = pd.DataFrame()
+        self.all_financial_data = pd.DataFrame()
 
     def setup_logging(self):
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(message)s')
 
     @staticmethod
     def get_date_days_ago(days, date_format='%Y-%m-%dT%H:%M:%S.%fZ'):
@@ -44,26 +50,82 @@ class Component(ComponentBase):
 
         self.refresh_amazon_token()
         if self.access_token:
-            order_segments = self.split_date_range(self.date_range, 28)
-            for start_date, end_date in order_segments:
-                report_id = self.create_report(start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL")
-                if report_id:
-                    self.poll_report_status_and_download(report_id, self.all_orders_data, 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
-                    if not self.all_orders_data.empty:
-                        self.process_data(self.all_orders_data, 'orders.csv', ['amazon-order-id', 'sku', 'asin'])
-                        self.all_orders_data = pd.DataFrame()  # Reset after writing
+            self.handle_orders()
+            self.handle_returns()
+            self.handle_finances()
 
-            return_segments = self.split_date_range(self.date_range, 50)
-            for start_date, end_date in return_segments:
-                report_id = self.create_report(start_date, end_date, "GET_XML_RETURNS_DATA_BY_RETURN_DATE")
-                if report_id:
-                    self.poll_report_status_and_download(report_id, self.all_returns_data, 'returns.csv', is_xml=True, primary_keys=['return-id', 'order-id'])
-                    if not self.all_returns_data.empty:
-                        self.process_data(self.all_returns_data, 'returns.csv', ['return-id', 'order-id'])
-                        self.all_returns_data = pd.DataFrame()  # Reset after writing
         else:
             logging.error("Failed to refresh token and could not proceed.")
 
+    def handle_orders(self):
+        order_segments = self.split_date_range(self.date_range, 28)
+        # Initialize a DataFrame to hold all orders data.
+        all_orders_data = pd.DataFrame()
+        for start_date, end_date in order_segments:
+            report_id = self.create_report(
+                start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL")
+            if report_id:
+                temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
+                ), 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
+                if not temp_data.empty:
+                    all_orders_data = pd.concat(
+                        [all_orders_data, temp_data], ignore_index=True)
+        # Log before processing data
+        logging.info(
+            f"Number of records to process for orders: {len(all_orders_data)}")
+        # Write to CSV after collecting data from all reports
+        if not all_orders_data.empty:
+            self.process_data(all_orders_data, 'orders.csv', [
+                              'amazon-order-id', 'sku', 'asin'])
+        else:
+            logging.warning("No order data to process.")
+
+    def handle_returns(self):
+        return_segments = self.split_date_range(self.date_range, 50)
+        all_returns_data = pd.DataFrame()
+        for start_date, end_date in return_segments:
+            report_id = self.create_report(
+                start_date, end_date, "GET_XML_RETURNS_DATA_BY_RETURN_DATE")
+            if report_id:
+                temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
+                ), 'returns.csv', is_xml=True, primary_keys=['return-id', 'order-id'])
+                if not temp_data.empty:
+                    all_returns_data = pd.concat(
+                        [all_returns_data, temp_data], ignore_index=True)
+        # Log before processing data
+        logging.info(
+            f"Number of records to process for returns: {len(all_returns_data)}")
+        if not all_returns_data.empty:
+            self.process_data(all_returns_data, 'returns.csv', [
+                              'return-id', 'order-id'])
+        else:
+            logging.warning("No return data to process.")
+
+    def handle_finances(self):
+        financial_data = self.fetch_financial_events()
+        # Initialize the dataframe to hold all data.
+        all_financial_data = pd.DataFrame()
+
+        while financial_data:
+            processed_data = self.process_financial_data(financial_data)
+            # Ensure data is concatenated correctly.
+            all_financial_data = pd.concat(
+                [all_financial_data, processed_data], ignore_index=True)
+
+            next_token = financial_data.get('payload', {}).get('NextToken')
+            if next_token:
+                logging.info(
+                    f"Fetching next page of financial events with NextToken.")
+                financial_data = self.fetch_financial_events(next_token)
+            else:
+                break
+
+        # Only write to CSV after all data is gathered.
+        if not all_financial_data.empty:
+            self.process_data(all_financial_data, 'finance.csv', [
+                              'amazon_order_id', 'seller_sku', 'order_item_id'])
+        else:
+            logging.info("No financial data to process.")
 
     def refresh_amazon_token(self):
         logging.info("Attempting to refresh the Amazon token.")
@@ -85,7 +147,7 @@ class Component(ComponentBase):
     def split_date_range(self, total_days, segment_length):
         logging.info("Splitting the date range into segments.")
         segments = []
-        start_date = datetime.utcnow()
+        start_date = datetime.utcnow() - timedelta(minutes=5)
         while total_days > 0:
             current_segment_length = min(segment_length, total_days)
             end_date = start_date - timedelta(days=current_segment_length)
@@ -95,7 +157,8 @@ class Component(ComponentBase):
         return segments
 
     def create_report(self, start_date, end_date, report_type):
-        logging.info("Creating %s report from %s to %s", report_type, start_date, end_date)
+        logging.info("Creating %s report from %s to %s",
+                     report_type, start_date, end_date)
         url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
         headers = {
             'Content-Type': 'application/json',
@@ -115,11 +178,12 @@ class Component(ComponentBase):
         else:
             logging.error("Failed to create report: %s", response.text)
             return None
-        
+
     def poll_report_status_and_download(self, report_id, data_frame, file_name, is_xml, primary_keys):
         logging.info(f"Polling report status for ID {report_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports/{report_id}"
-        headers = {'x-amz-access-token': self.access_token, 'Content-Type': 'application/json'}
+        headers = {'x-amz-access-token': self.access_token,
+                   'Content-Type': 'application/json'}
         while True:
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
@@ -127,64 +191,55 @@ class Component(ComponentBase):
                 logging.info("Report status: %s", status)
                 if status == 'DONE':
                     document_id = response.json().get('reportDocumentId')
-                    self.download_report(document_id, data_frame, file_name, is_xml, primary_keys)  # Pass primary_keys to download_report
-                    break
+                    data_frame = self.download_report(
+                        document_id, data_frame, file_name, is_xml, primary_keys)
+                    logging.info(
+                        f"Data from report {report_id} loaded, records: {len(data_frame)}")
+                    return data_frame  # Return the updated dataframe
                 elif status in ['CANCELLED', 'FATAL']:
-                    logging.error("Report processing ended with status: %s", status)
+                    logging.error(
+                        "Report processing ended with status: %s", status)
                     break
                 else:
                     logging.info("Waiting before the next status check...")
                     time.sleep(10)
             else:
-                logging.error("Failed to poll report status: %s", response.text)
+                logging.error(
+                    "Failed to poll report status: %s", response.text)
                 break
+        return pd.DataFrame()  # Return an empty DataFrame if failed
 
     def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys):
         logging.info(f"Downloading report document ID: {document_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/documents/{document_id}"
-        headers = {'x-amz-access-token': self.access_token, 'Content-Type': 'application/json'}
+        headers = {'x-amz-access-token': self.access_token,
+                   'Content-Type': 'application/json'}
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             document_url = response.json().get('url')
-            updated_df = self.process_document(document_url, response.json().get('compressionAlgorithm', ''), data_frame, is_xml)
-            if not updated_df.empty:
-                self.process_data(updated_df, file_name, primary_keys)  # Process and save each segment individually
+            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml)
         else:
             logging.error(f"Failed to download document: {response.text}")
+            # Ensure this returns an empty DataFrame on failure.
+            return pd.DataFrame()
 
-
-    def process_document(self, document_url, compression_algorithm, data_frame, is_xml):
-        logging.info(f"Processing document with compression: {compression_algorithm}")
+    def process_document(self, document_url, compression_algorithm, is_xml):
         response = requests.get(document_url)
         if response.status_code == 200:
-            content = gzip.decompress(response.content) if compression_algorithm == 'GZIP' else response.content
-            try:
-                if is_xml:
-                    # Here you'll handle XML processing.
-                    # Let's assume you want to parse XML directly here
-                    df = self.parse_xml_data(content)
-                    if df is not None and not df.empty:
-                        return pd.concat([data_frame, df], ignore_index=True)
-                    else:
-                        logging.warning("No data found in the document.")
-                        return data_frame
-                else:
-                    # For CSV or other formats
-                    df = pd.read_csv(io.StringIO(content.decode('utf-8')), delimiter='\t')
-                    if not df.empty:
-                        return pd.concat([data_frame, df], ignore_index=True)
-                    else:
-                        logging.warning("No data found in the document.")
-                        return data_frame
-            except Exception as e:
-                logging.error(f"Failed to process document due to: {e}")
-                return data_frame
+            content = gzip.decompress(
+                response.content) if compression_algorithm == 'GZIP' else response.content
+            if is_xml:
+                data_frame = self.parse_xml_data(content)
+            else:
+                data_frame = pd.read_csv(io.StringIO(
+                    content.decode('utf-8')), delimiter='\t')
+            return data_frame
         else:
             logging.error("Failed to download or process document.")
-            return data_frame  # Return the original or updated DataFrame
-
+            return pd.DataFrame()
 
     def parse_xml_data(self, xml_data):
+        logging.info("Starting XML data parsing.")
         """ Parse XML and extract data into a DataFrame. """
         root = ET.fromstring(xml_data)
         all_records = []
@@ -192,7 +247,7 @@ class Component(ComponentBase):
         # Iterate over each return_detail element in the XML
         for return_detail in root.findall('.//return_details'):
             item_detail = return_detail.find('.//item_details')
-            
+
             # Extracting fields from item_details and return_details
             record = {
                 'item_name': item_detail.findtext('item_name', ''),
@@ -219,21 +274,119 @@ class Component(ComponentBase):
                 'order_quantity': return_detail.findtext('order_quantity', '')
             }
             all_records.append(record)
-
+        logging.info("Completed parsing XML data.")
         return pd.DataFrame(all_records)
 
-    def process_data(self, df, file_name, primary_keys):
-        if not df.empty:
-            # Get the full path for the CSV file
-            table_path = self.create_out_table_definition(file_name, incremental=True, primary_key=primary_keys).full_path
+    def fetch_financial_events(self, next_token=None):
+        logging.info("Fetching financial events.")
+        url = "https://sellingpartnerapi-eu.amazon.com/finances/v0/financialEvents"
+        headers = {'x-amz-access-token': self.access_token,
+                   'Content-Type': 'application/json'}
+        params = {'NextToken': next_token} if next_token else {
+            'PostedAfter': self.get_date_days_ago(self.date_range)}
 
-            # Since the file is always expected to be created new, always include headers.
-            df.to_csv(table_path, index=False)
-            logging.info(f"File {file_name} created and data written successfully.")
+        response = self.controlled_request(
+            'get', url, headers=headers, params=params)
+        if response.status_code == 200:
+            logging.info("Financial events fetched successfully.")
+            return response.json()
         else:
-            logging.warning(f"No data available to write to {file_name}. DataFrame is empty.")
+            logging.error(f"Failed to fetch financial events: {response.text}")
+            return None
 
+    def controlled_request(self, method, url, headers=None, params=None, data=None):
+        try:
+            response = requests.request(
+                method, url, headers=headers, params=params, data=data)
+            if response.status_code == 429:  # Check if rate limit was hit
+                logging.warning("Rate limit hit, sleeping for 2 seconds...")
+                time.sleep(2)
+                return self.controlled_request(method, url, headers, params, data)
+            return response
+        except requests.exceptions.RequestException as e:
+            logging.error("HTTP Request failed: %s", e)
+            return None
 
+    @staticmethod
+    def camel_to_snake(name):
+        """Converts CamelCase to snake_case"""
+        name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+
+    def process_financial_data(self, data):
+        logging.info("Starting to process financial data.")
+        if not data or 'payload' not in data or 'FinancialEvents' not in data['payload']:
+            logging.error("No data or incorrect data structure received.")
+            # Return an empty DataFrame to handle this scenario gracefully.
+            return pd.DataFrame()
+
+        # Base columns for financial data DataFrame
+        columns = [
+            'amazon_order_id', 'marketplace_name', 'posted_date', 'seller_sku', 'order_item_id',
+            'quantity_shipped'
+        ]
+        charge_types = set()
+        fee_types = set()
+
+        # Process each event in the data
+        all_rows = []  # Collect all rows in a list to concatenate once at the end
+        for event in data['payload']['FinancialEvents']['ShipmentEventList']:
+            for item in event['ShipmentItemList']:
+                for charge in item['ItemChargeList']:
+                    charge_types.add(self.camel_to_snake(charge['ChargeType']))
+                for fee in item['ItemFeeList']:
+                    fee_types.add(self.camel_to_snake(fee['FeeType']))
+
+        # Adding columns for each type of charge and fee
+        for charge_type in charge_types:
+            columns.append(f"{charge_type}_amount")
+            columns.append(f"{charge_type}_currency")
+        for fee_type in fee_types:
+            columns.append(f"{fee_type}_amount")
+            columns.append(f"{fee_type}_currency")
+
+        # Initialize DataFrame with new columns
+        financial_data_df = pd.DataFrame(columns=columns)
+
+        # Populate DataFrame with data
+        for event in data['payload']['FinancialEvents']['ShipmentEventList']:
+            for item in event['ShipmentItemList']:
+                row = {
+                    'amazon_order_id': event['AmazonOrderId'],
+                    'marketplace_name': event['MarketplaceName'],
+                    'posted_date': event['PostedDate'],
+                    'seller_sku': item['SellerSKU'],
+                    'order_item_id': item['OrderItemId'],
+                    'quantity_shipped': item['QuantityShipped']
+                }
+                for charge_type in charge_types:
+                    charge_key = f"{self.camel_to_snake(charge_type)}_amount"
+                    currency_key = f"{self.camel_to_snake(charge_type)}_currency"
+                    row[charge_key] = item['ItemChargeList'][0]['ChargeAmount']['CurrencyAmount']
+                    row[currency_key] = item['ItemChargeList'][0]['ChargeAmount']['CurrencyCode']
+
+                for fee_type in fee_types:
+                    fee_key = f"{self.camel_to_snake(fee_type)}_amount"
+                    currency_key = f"{self.camel_to_snake(fee_type)}_currency"
+                    row[fee_key] = item['ItemFeeList'][0]['FeeAmount']['CurrencyAmount']
+                    row[currency_key] = item['ItemFeeList'][0]['FeeAmount']['CurrencyCode']
+
+                all_rows.append(row)  # Add row to list
+
+        # Return DataFrame with all processed data
+        return pd.DataFrame(all_rows, columns=columns)
+
+    def process_data(self, df, file_name, primary_keys):
+        logging.info(f"Processing {len(df)} records to write to {file_name}.")
+        if not df.empty:
+            table_path = self.create_out_table_definition(
+                file_name, incremental=True, primary_key=primary_keys).full_path
+            df.to_csv(table_path, index=False)
+            logging.info(
+                f"File {file_name} created and data written successfully.")
+        else:
+            logging.warning(
+                f"No data available to write to {file_name}. DataFrame is empty.")
 
 
 if __name__ == "__main__":
