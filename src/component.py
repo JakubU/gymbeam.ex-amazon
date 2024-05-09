@@ -108,6 +108,7 @@ class Component(ComponentBase):
 
         while financial_data:
             processed_data = self.process_financial_data(financial_data)
+            print(f"Number of records to process for processed_data: {len(processed_data)}")
             # Ensure data is concatenated correctly.
             all_financial_data = pd.concat(
                 [all_financial_data, processed_data], ignore_index=True)
@@ -317,8 +318,7 @@ class Component(ComponentBase):
         logging.info("Starting to process financial data.")
         if not data or 'payload' not in data or 'FinancialEvents' not in data['payload']:
             logging.error("No data or incorrect data structure received.")
-            # Return an empty DataFrame to handle this scenario gracefully.
-            return pd.DataFrame()
+            return pd.DataFrame()  # Return an empty DataFrame to handle this scenario gracefully.
 
         # Base columns for financial data DataFrame
         columns = [
@@ -327,15 +327,18 @@ class Component(ComponentBase):
         ]
         charge_types = set()
         fee_types = set()
+        promotion_ids = set()
 
-        # Process each event in the data
-        all_rows = []  # Collect all rows in a list to concatenate once at the end
+        # Collect all types of charges, fees, and promotions
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
                 for charge in item['ItemChargeList']:
                     charge_types.add(self.camel_to_snake(charge['ChargeType']))
                 for fee in item['ItemFeeList']:
                     fee_types.add(self.camel_to_snake(fee['FeeType']))
+                if 'PromotionList' in item:
+                    for promo in item['PromotionList']:
+                        promotion_ids.add((self.camel_to_snake(promo['PromotionType']), promo['PromotionId']))
 
         # Adding columns for each type of charge and fee
         for charge_type in charge_types:
@@ -344,9 +347,14 @@ class Component(ComponentBase):
         for fee_type in fee_types:
             columns.append(f"{fee_type}_amount")
             columns.append(f"{fee_type}_currency")
+        for promo_type, promo_id in promotion_ids:
+            columns.append(f"{promo_type}_amount")
+            columns.append(f"{promo_type}_currency")
+            columns.append(f"{promo_type}_id")
 
         # Initialize DataFrame with new columns
         financial_data_df = pd.DataFrame(columns=columns)
+        all_rows = []
 
         # Populate DataFrame with data
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
@@ -361,23 +369,28 @@ class Component(ComponentBase):
                 }
                 for charge in item['ItemChargeList']:
                     charge_type_snake = self.camel_to_snake(charge['ChargeType'])
-                    charge_key = f"{charge_type_snake}_amount"
-                    currency_key = f"{charge_type_snake}_currency"
-                    row[charge_key] = charge['ChargeAmount']['CurrencyAmount']
-                    row[currency_key] = charge['ChargeAmount']['CurrencyCode']
+                    row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
+                    row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
 
                 for fee in item['ItemFeeList']:
                     fee_type_snake = self.camel_to_snake(fee['FeeType'])
-                    fee_key = f"{fee_type_snake}_amount"
-                    currency_key = f"{fee_type_snake}_currency"
-                    row[fee_key] = fee['FeeAmount']['CurrencyAmount']
-                    row[currency_key] = fee['FeeAmount']['CurrencyCode']
+                    row[f"{fee_type_snake}_amount"] = fee['FeeAmount']['CurrencyAmount']
+                    row[f"{fee_type_snake}_currency"] = fee['FeeAmount']['CurrencyCode']
 
-        all_rows.append(row)
+                if 'PromotionList' in item:
+                    for promo in item['PromotionList']:
+                        promo_type_snake = self.camel_to_snake(promo['PromotionType'])
+                        promo_type_id = f"{promo_type_snake}_id"
+                        promo_type_amount = f"{promo_type_snake}_amount"
+                        promo_type_currency = f"{promo_type_snake}_currency"
+                        row[promo_type_id] = promo['PromotionId']
+                        row[promo_type_amount] = promo['PromotionAmount']['CurrencyAmount']
+                        row[promo_type_currency] = promo['PromotionAmount']['CurrencyCode']
 
+                all_rows.append(row)  # Append each item as a row to the list
 
-        # Return DataFrame with all processed data
         return pd.DataFrame(all_rows, columns=columns)
+
 
     def process_data(self, df, file_name, primary_keys):
         logging.info(f"Processing {len(df)} records to write to {file_name}.")
