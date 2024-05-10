@@ -15,7 +15,7 @@ import re
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# Configuration variables
+# Configuration variables for API access and other settings
 KEY_REFRESH_TOKEN = '#refresh_token'
 KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
@@ -32,15 +32,18 @@ class Component(ComponentBase):
         self.all_financial_data = pd.DataFrame()
 
     def setup_logging(self):
+        # Configure logging format and level
         logging.basicConfig(level=logging.INFO,
                             format='%(asctime)s - %(levelname)s - %(message)s')
 
     @staticmethod
     def get_date_days_ago(days, date_format='%Y-%m-%dT%H:%M:%S.%fZ'):
+        # Return a formatted string of the datetime days ago from now
         date = datetime.utcnow() - timedelta(days=days)
         return date.strftime(date_format)
 
     def run(self):
+        # Main execution method called to process data
         params = self.configuration.parameters
         self.refresh_token = params.get(KEY_REFRESH_TOKEN)
         self.app_id = params.get(KEY_APP_ID)
@@ -58,6 +61,7 @@ class Component(ComponentBase):
             logging.error("Failed to refresh token and could not proceed.")
 
     def handle_orders(self):
+        # Fetch and process order data
         order_segments = self.split_date_range(self.date_range, 28)
         # Initialize a DataFrame to hold all orders data.
         all_orders_data = pd.DataFrame()
@@ -81,6 +85,7 @@ class Component(ComponentBase):
             logging.warning("No order data to process.")
 
     def handle_returns(self):
+        # Fetch and process return data
         return_segments = self.split_date_range(self.date_range, 50)
         all_returns_data = pd.DataFrame()
         for start_date, end_date in return_segments:
@@ -102,13 +107,15 @@ class Component(ComponentBase):
             logging.warning("No return data to process.")
 
     def handle_finances(self):
+        # Fetch and process financial data
         financial_data = self.fetch_financial_events()
         # Initialize the dataframe to hold all data.
         all_financial_data = pd.DataFrame()
 
         while financial_data:
             processed_data = self.process_financial_data(financial_data)
-            print(f"Number of records to process for processed_data: {len(processed_data)}")
+            print(
+                f"Number of records to process for processed_data: {len(processed_data)}")
             # Ensure data is concatenated correctly.
             all_financial_data = pd.concat(
                 [all_financial_data, processed_data], ignore_index=True)
@@ -129,6 +136,7 @@ class Component(ComponentBase):
             logging.info("No financial data to process.")
 
     def refresh_amazon_token(self):
+        # Refresh the Amazon API token
         logging.info("Attempting to refresh the Amazon token.")
         url = "https://api.amazon.com/auth/o2/token"
         payload = {
@@ -146,6 +154,7 @@ class Component(ComponentBase):
             logging.error("Failed to refresh token: %s", response.text)
 
     def split_date_range(self, total_days, segment_length):
+        # Split the specified date range into segments for processing
         logging.info("Splitting the date range into segments.")
         segments = []
         start_date = datetime.utcnow() - timedelta(minutes=5)
@@ -158,6 +167,7 @@ class Component(ComponentBase):
         return segments
 
     def create_report(self, start_date, end_date, report_type):
+        # Request a new report from Amazon SP-API
         logging.info("Creating %s report from %s to %s",
                      report_type, start_date, end_date)
         url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
@@ -181,6 +191,7 @@ class Component(ComponentBase):
             return None
 
     def poll_report_status_and_download(self, report_id, data_frame, file_name, is_xml, primary_keys):
+        # Check report status and download when ready
         logging.info(f"Polling report status for ID {report_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports/{report_id}"
         headers = {'x-amz-access-token': self.access_token,
@@ -211,6 +222,7 @@ class Component(ComponentBase):
         return pd.DataFrame()  # Return an empty DataFrame if failed
 
     def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys):
+        # Download the report document from Amazon SP-API
         logging.info(f"Downloading report document ID: {document_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/documents/{document_id}"
         headers = {'x-amz-access-token': self.access_token,
@@ -225,6 +237,7 @@ class Component(ComponentBase):
             return pd.DataFrame()
 
     def process_document(self, document_url, compression_algorithm, is_xml):
+        # Process the document after downloading, convert from XML/CSV as needed
         response = requests.get(document_url)
         if response.status_code == 200:
             content = gzip.decompress(
@@ -240,6 +253,7 @@ class Component(ComponentBase):
             return pd.DataFrame()
 
     def parse_xml_data(self, xml_data):
+        # Parse XML and extract data into a DataFrame
         logging.info("Starting XML data parsing.")
         """ Parse XML and extract data into a DataFrame. """
         root = ET.fromstring(xml_data)
@@ -279,6 +293,7 @@ class Component(ComponentBase):
         return pd.DataFrame(all_records)
 
     def fetch_financial_events(self, next_token=None):
+        # Fetch financial events from Amazon SP-API
         logging.info("Fetching financial events.")
         url = "https://sellingpartnerapi-eu.amazon.com/finances/v0/financialEvents"
         headers = {'x-amz-access-token': self.access_token,
@@ -286,6 +301,7 @@ class Component(ComponentBase):
         params = {'NextToken': next_token} if next_token else {
             'PostedAfter': self.get_date_days_ago(self.date_range)}
 
+        print(self.get_date_days_ago(self.date_range))
         response = self.controlled_request(
             'get', url, headers=headers, params=params)
         if response.status_code == 200:
@@ -296,6 +312,7 @@ class Component(ComponentBase):
             return None
 
     def controlled_request(self, method, url, headers=None, params=None, data=None):
+        # Send requests and handle rate limits
         try:
             response = requests.request(
                 method, url, headers=headers, params=params, data=data)
@@ -310,15 +327,18 @@ class Component(ComponentBase):
 
     @staticmethod
     def camel_to_snake(name):
+        # Converts CamelCase to snake_case
         """Converts CamelCase to snake_case"""
         name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
         return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
 
     def process_financial_data(self, data):
+        # Process raw financial data into structured DataFrame
         logging.info("Starting to process financial data.")
         if not data or 'payload' not in data or 'FinancialEvents' not in data['payload']:
             logging.error("No data or incorrect data structure received.")
-            return pd.DataFrame()  # Return an empty DataFrame to handle this scenario gracefully.
+            # Return an empty DataFrame to handle this scenario gracefully.
+            return pd.DataFrame()
 
         # Base columns for financial data DataFrame
         columns = [
@@ -336,9 +356,9 @@ class Component(ComponentBase):
                     charge_types.add(self.camel_to_snake(charge['ChargeType']))
                 for fee in item['ItemFeeList']:
                     fee_types.add(self.camel_to_snake(fee['FeeType']))
-                if 'PromotionList' in item:
-                    for promo in item['PromotionList']:
-                        promotion_ids.add((self.camel_to_snake(promo['PromotionType']), promo['PromotionId']))
+                # if 'PromotionList' in item:
+                #     for promo in item['PromotionList']:
+                #         promotion_ids.add((self.camel_to_snake(promo['PromotionType']), promo['PromotionId']))
 
         # Adding columns for each type of charge and fee
         for charge_type in charge_types:
@@ -368,7 +388,8 @@ class Component(ComponentBase):
                     'quantity_shipped': item['QuantityShipped']
                 }
                 for charge in item['ItemChargeList']:
-                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
+                    charge_type_snake = self.camel_to_snake(
+                        charge['ChargeType'])
                     row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
                     row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
 
@@ -377,22 +398,22 @@ class Component(ComponentBase):
                     row[f"{fee_type_snake}_amount"] = fee['FeeAmount']['CurrencyAmount']
                     row[f"{fee_type_snake}_currency"] = fee['FeeAmount']['CurrencyCode']
 
-                if 'PromotionList' in item:
-                    for promo in item['PromotionList']:
-                        promo_type_snake = self.camel_to_snake(promo['PromotionType'])
-                        promo_type_id = f"{promo_type_snake}_id"
-                        promo_type_amount = f"{promo_type_snake}_amount"
-                        promo_type_currency = f"{promo_type_snake}_currency"
-                        row[promo_type_id] = promo['PromotionId']
-                        row[promo_type_amount] = promo['PromotionAmount']['CurrencyAmount']
-                        row[promo_type_currency] = promo['PromotionAmount']['CurrencyCode']
+                # if 'PromotionList' in item:
+                #     for promo in item['PromotionList']:
+                #         promo_type_snake = self.camel_to_snake(promo['PromotionType'])
+                #         promo_type_id = f"{promo_type_snake}_id"
+                #         promo_type_amount = f"{promo_type_snake}_amount"
+                #         promo_type_currency = f"{promo_type_snake}_currency"
+                #         row[promo_type_id] = promo['PromotionId']
+                #         row[promo_type_amount] = promo['PromotionAmount']['CurrencyAmount']
+                #         row[promo_type_currency] = promo['PromotionAmount']['CurrencyCode']
 
                 all_rows.append(row)  # Append each item as a row to the list
 
         return pd.DataFrame(all_rows, columns=columns)
 
-
     def process_data(self, df, file_name, primary_keys):
+        # Process and save data to a file
         logging.info(f"Processing {len(df)} records to write to {file_name}.")
         if not df.empty:
             table_path = self.create_out_table_definition(
