@@ -20,6 +20,20 @@ This component is designed to connect to Amazon's Selling Partner API and extrac
 - **#refresh_token**, **#app_id**, **#client_secret_id**: These are secured parameters used for OAuth authentication with Amazon's API. They must be stored securely and are essential for accessing Amazon's resources.
 - **date_range**: Determines the time frame for the data extraction. The component calculates the start date by subtracting the given number of days from the current date.
 
+### Obtaining API Credentials and Marketplace ID
+
+1. **Marketplace ID**: Identify the Amazon marketplace ID relevant to your geographic sales region. This ID is crucial as it determines which Amazon data you can access. [See Marketplace IDs](https://developer-docs.amazon.com/sp-api/docs/marketplace-ids).
+
+2. **Register for Amazon API Access**:
+    - Sign in to your Amazon Seller Central account.
+    - Navigate to the 'Apps & Services' section and select 'Develop Apps'.
+    - Follow the process to create a new application, which will provide you with the necessary `app_id` and other details.
+    - [Connecting to the Selling Partner API Guide](https://developer-docs.amazon.com/sp-api/docs/connecting-to-the-selling-partner-api?ld=NSGoogle) provides a step-by-step approach.
+
+3. **Authentication Credentials**:
+    - Once your application is created, you will receive a `refresh_token`, `app_id`, and `client_secret_id`.
+    - These credentials will be used to authenticate API requests made by this component.
+
 ### Authorization
 
 Describes OAuth credentials setup for secure access:
