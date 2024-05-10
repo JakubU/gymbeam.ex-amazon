@@ -1,4 +1,4 @@
-# Configuration Description for Amazon Data Integration
+# Configuration Description for Amazon Extractor
 
 ## Description
 
