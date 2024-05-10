@@ -1,4 +1,4 @@
-# Amazon Data Integration
+# Amazon Data Extractor
 
 ## Description
 
