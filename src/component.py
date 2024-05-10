@@ -301,7 +301,6 @@ class Component(ComponentBase):
         params = {'NextToken': next_token} if next_token else {
             'PostedAfter': self.get_date_days_ago(self.date_range)}
 
-        print(self.get_date_days_ago(self.date_range))
         response = self.controlled_request(
             'get', url, headers=headers, params=params)
         if response.status_code == 200:
