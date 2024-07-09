@@ -7,3 +7,5 @@ requests
 pandas
 ratelimit
 lxml
+warnings
+re

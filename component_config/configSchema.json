@@ -11,25 +11,43 @@
       "type": "string",
       "title": "Date Range",
       "description": "Enter the date range as a number of days. This field specifies the duration from today back to the number of days you enter. For example, if you input '7', it will retrieve data from the past week up to today.",
-      "propertyOrder": 5
+      "propertyOrder": 8
     },
   "#refresh_token": {
     "type": "string",
-    "title": "Amazon Refresh Token",
+    "title": "Amazon Refresh Token (Amazon Seller Central)",
     "format": "password",
     "propertyOrder": 2
   },
   "#app_id": {
     "type": "string",
-    "title": "LWA App ID",
+    "title": "LWA App ID (Amazon Seller Central)",
     "format": "password",
     "propertyOrder": 3
   },
   "#client_secret_id": {
     "type": "string",
-    "title": "LWA Client ID",
+    "title": "LWA Client ID (Amazon Seller Central)",
     "format": "password",
     "propertyOrder": 4
+  },
+  "#refresh_token_ads": {
+    "type": "string",
+    "title": "Amazon Refresh Token (Amazon Ads)",
+    "format": "password",
+    "propertyOrder": 5
+  },
+  "#app_id_ads": {
+    "type": "string",
+    "title": "LWA App ID (Amazon Ads)",
+    "format": "password",
+    "propertyOrder": 6
+  },
+  "#client_secret_id_ads": {
+    "type": "string",
+    "title": "LWA Client ID (Amazon Ads)",
+    "format": "password",
+    "propertyOrder": 7
   }
 }
 }
