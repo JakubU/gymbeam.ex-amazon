@@ -21,6 +21,9 @@ KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
 KEY_MARKETPLACE_ID = 'marketplace_id'
 KEY_DATE_RANGE = 'date_range'
+KEY_REFRESH_TOKEN_ADS = '#refresh_token_ads'
+KEY_APP_ID_ADS = '#app_id_ads'
+KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 
 
 class Component(ComponentBase):
@@ -30,6 +33,8 @@ class Component(ComponentBase):
         self.all_orders_data = pd.DataFrame()
         self.all_returns_data = pd.DataFrame()
         self.all_financial_data = pd.DataFrame()
+        self.all_ads_data = pd.DataFrame() 
+
 
     def setup_logging(self):
         # Configure logging format and level
@@ -50,13 +55,20 @@ class Component(ComponentBase):
         self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
         self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
         self.date_range = int(params.get(KEY_DATE_RANGE, 7))
+        self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
+        self.app_id_ads = params.get(KEY_APP_ID_ADS)
+        self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
 
         self.refresh_amazon_token()
+        self.refresh_amazon_ads_token()
         if self.access_token:
             self.handle_orders()
             self.handle_returns()
             self.handle_finances()
-
+        if self.ads_access_token:
+            self.create_and_download_ads_report("665807000098197", "Amazon.it")  # Italy
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de")  # Germany
+            self.save_ads_data_to_csv()  
         else:
             logging.error("Failed to refresh token and could not proceed.")
 
@@ -152,6 +164,24 @@ class Component(ComponentBase):
             logging.info("Token refreshed successfully.")
         else:
             logging.error("Failed to refresh token: %s", response.text)
+
+    def refresh_amazon_ads_token(self):
+        # Refresh the Amazon Ads API token
+        logging.info("Attempting to refresh the Amazon Ads token.")
+        url = "https://api.amazon.com/auth/o2/token"
+        payload = {
+            'grant_type': 'refresh_token',
+            'refresh_token': self.refresh_token_ads,
+            'client_id': self.app_id_ads,
+            'client_secret': self.client_secret_id_ads
+        }
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        response = requests.post(url, data=payload, headers=headers)
+        if response.ok:
+            self.ads_access_token = response.json().get("access_token")
+            logging.info("Ads token refreshed successfully.")
+        else:
+            logging.error("Failed to refresh ads token: %s", response.text)
 
     def split_date_range(self, total_days, segment_length):
         # Split the specified date range into segments for processing
@@ -423,6 +453,115 @@ class Component(ComponentBase):
         else:
             logging.warning(
                 f"No data available to write to {file_name}. DataFrame is empty.")
+
+    def create_and_download_ads_report(self, scope,country):
+        report_id = self.create_ads_report(scope)
+        if report_id:
+            report_url = self.poll_ads_report_status(report_id, scope)
+            if report_url:
+                report_data = self.download_ads_report(report_url)
+                self.process_ads_data(report_data, country)
+
+    def create_ads_report(self, scope):
+        # Create an Amazon Ads report
+        url = 'https://advertising-api-eu.amazon.com/reporting/reports'
+        headers = {
+            'Content-Type': 'application/vnd.createasyncreportrequest.v3+json',
+            'Amazon-Advertising-API-ClientId': self.app_id_ads,
+            'Amazon-Advertising-API-Scope': scope,
+            'Authorization': f'Bearer {self.ads_access_token}'
+        }
+        payload = {
+            "name": "SP advertised product report",
+            "startDate": (datetime.utcnow() - timedelta(days=2)).strftime('%Y-%m-%d'),
+            "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
+            "configuration": {
+                "adProduct": "SPONSORED_PRODUCTS",
+                "groupBy": ["advertiser"],
+                "columns": ["adGroupId", "campaignId", "campaignName", "date", "adId", "impressions", "advertisedAsin", "advertisedSku", "clicks", "cost", "costPerClick", "spend"],
+                "reportTypeId": "spAdvertisedProduct",
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON"
+            }
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            report_id = response.json().get('reportId')
+            logging.info(f"Report created successfully with ID: {report_id}")
+            return report_id
+        else:
+            logging.error(f"Failed to create Amazon Ads report: {response.text}")
+            return None
+
+    def poll_ads_report_status(self, report_id, scope):
+        # Poll the status of the Amazon Ads report
+        url = f'https://advertising-api-eu.amazon.com/reporting/reports/{report_id}'
+        headers = {
+            'Amazon-Advertising-API-ClientId': self.app_id_ads,
+            'Amazon-Advertising-API-Scope': scope,
+            'Authorization': f'Bearer {self.ads_access_token}'
+        }
+        while True:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                status = response.json().get('status')
+                logging.info(f"Report status: {status}")
+                if status == 'COMPLETED':
+                    return response.json().get('url')
+                elif status in ['FAILURE', 'CANCELLED']:
+                    logging.error(f"Report processing ended with status: {status}")
+                    break
+                else:
+                    logging.info("Waiting before the next status check...")
+                    time.sleep(30)  # Wait for 30 seconds before checking again
+            else:
+                logging.error(f"Failed to poll report status: {response.text}")
+                break
+        return None
+
+    def download_ads_report(self, report_url):
+        # Download the Amazon Ads report
+        response = requests.get(report_url)
+        if response.status_code == 200:
+            content = gzip.decompress(response.content)
+            return json.loads(content.decode('utf-8'))
+        else:
+            logging.error(f"Failed to download Amazon Ads report: {response.text}")
+            return None
+
+    def process_ads_data(self, report_data, country):
+        # Process and combine the Amazon Ads report data into a single DataFrame
+        logging.info(f"Processing Amazon Ads report data for country: {country}.")
+        if report_data:
+            df = pd.json_normalize(report_data)
+            df.rename(columns={
+                "adGroupId": "ad_group_id",
+                "campaignId": "campaign_id",
+                "campaignName": "campaign_name",
+                "date": "date",
+                "adId": "ad_id",
+                "impressions": "impressions",
+                "advertisedAsin": "advertised_asin",
+                "advertisedSku": "advertised_sku",
+                "clicks": "clicks",
+                "cost": "cost",
+                "costPerClick": "cost_per_click",
+                "spend": "spend"
+            }, inplace=True)
+            df['market'] = country
+            self.all_ads_data = pd.concat([self.all_ads_data, df], ignore_index=True)
+        else:
+            logging.warning("No data to process for Amazon Ads report.")
+
+    def save_ads_data_to_csv(self):
+        # Save combined ads data to a single CSV file
+        logging.info("Saving all combined Amazon Ads report data to CSV.")
+        if not self.all_ads_data.empty:
+            file_name = 'advertising.csv'
+            primary_keys = ['ad_id', 'campaign_id', 'date', 'advertised_sku', 'advertised_asin']
+            self.process_data(self.all_ads_data, file_name, primary_keys)
+        else:
+            logging.warning("No data available to save. DataFrame is empty.")
 
 
 if __name__ == "__main__":

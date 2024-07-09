@@ -18,6 +18,7 @@ This component is designed to connect to Amazon's Selling Partner API and extrac
 
 - **marketplace_id**: Specifies the Amazon marketplace from which data is to be extracted. It is crucial for directing API calls to the correct regional endpoint.
 - **#refresh_token**, **#app_id**, **#client_secret_id**: These are secured parameters used for OAuth authentication with Amazon's API. They must be stored securely and are essential for accessing Amazon's resources.
+- **#refresh_token_ads**, **#app_id_ads**, **#client_secret_id_ads**: These are secured parameters used for OAuth authentication with Amazon Ads API.
 - **date_range**: Determines the time frame for the data extraction. The component calculates the start date by subtracting the given number of days from the current date.
 
 ### Obtaining API Credentials and Marketplace ID
@@ -65,6 +66,9 @@ The component is fully integrated into the KBC platform, allowing users to confi
     "#refresh_token": "EncryptedToken",
     "#app_id": "EncryptedAppID",
     "#client_secret_id": "EncryptedClientSecret",
+    "#refresh_token_ads": "EncryptedTokenAds",
+    "#app_id_ads": "EncryptedAppIDAds",
+    "#client_secret_id_ads": "EncryptedClientSecretAds",
     "date_range": "30"
   }
 }
