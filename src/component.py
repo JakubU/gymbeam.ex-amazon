@@ -33,8 +33,7 @@ class Component(ComponentBase):
         self.all_orders_data = pd.DataFrame()
         self.all_returns_data = pd.DataFrame()
         self.all_financial_data = pd.DataFrame()
-        self.all_ads_data = pd.DataFrame() 
-
+        self.all_ads_data = pd.DataFrame()
 
     def setup_logging(self):
         # Configure logging format and level
@@ -61,16 +60,29 @@ class Component(ComponentBase):
 
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
-        if self.access_token:
-            self.handle_orders()
-            self.handle_returns()
-            self.handle_finances()
+        #if self.access_token:
+        #    self.handle_orders()
+        #    self.handle_returns()
+        #    self.handle_finances()
         if self.ads_access_token:
-            self.create_and_download_ads_report("665807000098197", "Amazon.it")  # Italy
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de")  # Germany
-            self.save_ads_data_to_csv()  
+            self.fetch_and_process_ads_reports("665807000098197", "Amazon.it", "2024-04-06", datetime.utcnow().strftime('%Y-%m-%d'))  # Italy
+            self.fetch_and_process_ads_reports("2780716582721957", "Amazon.de", "2024-04-06", datetime.utcnow().strftime('%Y-%m-%d'))  # Germany
+            self.save_ads_data_to_csv()
         else:
             logging.error("Failed to refresh token and could not proceed.")
+
+    def fetch_and_process_ads_reports(self, scope, country, start_date_str, end_date_str):
+        # Fetch and process ads reports iteratively within the date range
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        delta = timedelta(days=30)  # Maximum allowed range is 31 days
+
+        current_start_date = start_date
+        while current_start_date < end_date:
+            current_end_date = min(current_start_date + delta, end_date)
+            logging.info(f"Processing ads data from {current_start_date.strftime('%Y-%m-%d')} to {current_end_date.strftime('%Y-%m-%d')}")
+            self.create_and_download_ads_report(scope, country, current_start_date.strftime('%Y-%m-%d'), current_end_date.strftime('%Y-%m-%d'))
+            current_start_date = current_end_date + timedelta(days=1)
 
     def handle_orders(self):
         # Fetch and process order data
@@ -454,15 +466,15 @@ class Component(ComponentBase):
             logging.warning(
                 f"No data available to write to {file_name}. DataFrame is empty.")
 
-    def create_and_download_ads_report(self, scope,country):
-        report_id = self.create_ads_report(scope)
+    def create_and_download_ads_report(self, scope, country, start_date, end_date):
+        report_id = self.create_ads_report(scope, start_date, end_date)
         if report_id:
             report_url = self.poll_ads_report_status(report_id, scope)
             if report_url:
                 report_data = self.download_ads_report(report_url)
                 self.process_ads_data(report_data, country)
 
-    def create_ads_report(self, scope):
+    def create_ads_report(self, scope, start_date, end_date):
         # Create an Amazon Ads report
         url = 'https://advertising-api-eu.amazon.com/reporting/reports'
         headers = {
@@ -473,8 +485,8 @@ class Component(ComponentBase):
         }
         payload = {
             "name": "SP advertised product report",
-            "startDate": (datetime.utcnow() - timedelta(days=2)).strftime('%Y-%m-%d'),
-            "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
+            "startDate": start_date,
+            "endDate": end_date,
             "configuration": {
                 "adProduct": "SPONSORED_PRODUCTS",
                 "groupBy": ["advertiser"],
