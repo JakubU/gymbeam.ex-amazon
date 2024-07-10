@@ -60,10 +60,10 @@ class Component(ComponentBase):
 
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
-        #if self.access_token:
-        #    self.handle_orders()
-        #    self.handle_returns()
-        #    self.handle_finances()
+        if self.access_token:
+            self.handle_orders()
+            self.handle_returns()
+            self.handle_finances()
         if self.ads_access_token:
             self.fetch_and_process_ads_reports("665807000098197", "Amazon.it", "2024-04-06", datetime.utcnow().strftime('%Y-%m-%d'))  # Italy
             self.fetch_and_process_ads_reports("2780716582721957", "Amazon.de", "2024-04-06", datetime.utcnow().strftime('%Y-%m-%d'))  # Germany
