@@ -3,7 +3,6 @@ import requests
 from datetime import datetime, timedelta
 import pandas as pd
 from keboola.component.base import ComponentBase
-from keboola.component.exceptions import UserException
 import time
 import gzip
 import io
@@ -11,6 +10,8 @@ import json
 import xml.etree.ElementTree as ET
 import warnings
 import re
+import random
+import os
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -25,6 +26,9 @@ KEY_REFRESH_TOKEN_ADS = '#refresh_token_ads'
 KEY_APP_ID_ADS = '#app_id_ads'
 KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 
+# Set the data directory for local testing
+if not os.path.exists('/data/'):
+    os.environ['KBC_DATADIR'] = './data'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -33,8 +37,7 @@ class Component(ComponentBase):
         self.all_orders_data = pd.DataFrame()
         self.all_returns_data = pd.DataFrame()
         self.all_financial_data = pd.DataFrame()
-        self.all_ads_data = pd.DataFrame() 
-
+        self.all_ads_data = pd.DataFrame()
 
     def setup_logging(self):
         # Configure logging format and level
@@ -68,7 +71,7 @@ class Component(ComponentBase):
         if self.ads_access_token:
             self.create_and_download_ads_report("665807000098197", "Amazon.it")  # Italy
             self.create_and_download_ads_report("2780716582721957", "Amazon.de")  # Germany
-            self.save_ads_data_to_csv()  
+            self.save_ads_data_to_csv()
         else:
             logging.error("Failed to refresh token and could not proceed.")
 
@@ -126,8 +129,6 @@ class Component(ComponentBase):
 
         while financial_data:
             processed_data = self.process_financial_data(financial_data)
-            print(
-                f"Number of records to process for processed_data: {len(processed_data)}")
             # Ensure data is concatenated correctly.
             all_financial_data = pd.concat(
                 [all_financial_data, processed_data], ignore_index=True)
@@ -227,8 +228,8 @@ class Component(ComponentBase):
         headers = {'x-amz-access-token': self.access_token,
                    'Content-Type': 'application/json'}
         while True:
-            response = requests.get(url, headers=headers)
-            if response.status_code == 200:
+            response = self.controlled_request('get', url, headers=headers)
+            if response and response.status_code == 200:
                 status = response.json().get('processingStatus')
                 logging.info("Report status: %s", status)
                 if status == 'DONE':
@@ -257,8 +258,8 @@ class Component(ComponentBase):
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/documents/{document_id}"
         headers = {'x-amz-access-token': self.access_token,
                    'Content-Type': 'application/json'}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
+        response = self.controlled_request('get', url, headers=headers)
+        if response and response.status_code == 200:
             document_url = response.json().get('url')
             return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml)
         else:
@@ -268,8 +269,8 @@ class Component(ComponentBase):
 
     def process_document(self, document_url, compression_algorithm, is_xml):
         # Process the document after downloading, convert from XML/CSV as needed
-        response = requests.get(document_url)
-        if response.status_code == 200:
+        response = self.controlled_request('get', document_url)
+        if response and response.status_code == 200:
             content = gzip.decompress(
                 response.content) if compression_algorithm == 'GZIP' else response.content
             if is_xml:
@@ -333,22 +334,26 @@ class Component(ComponentBase):
 
         response = self.controlled_request(
             'get', url, headers=headers, params=params)
-        if response.status_code == 200:
+        if response and response.status_code == 200:
             logging.info("Financial events fetched successfully.")
             return response.json()
         else:
             logging.error(f"Failed to fetch financial events: {response.text}")
             return None
 
-    def controlled_request(self, method, url, headers=None, params=None, data=None):
-        # Send requests and handle rate limits
+    def controlled_request(self, method, url, headers=None, params=None, data=None, retry_count=0):
+        # Send requests and handle rate limits with exponential backoff
         try:
-            response = requests.request(
-                method, url, headers=headers, params=params, data=data)
+            response = requests.request(method, url, headers=headers, params=params, data=data)
             if response.status_code == 429:  # Check if rate limit was hit
-                logging.warning("Rate limit hit, sleeping for 2 seconds...")
-                time.sleep(2)
-                return self.controlled_request(method, url, headers, params, data)
+                if retry_count < 5:  # Limit the number of retries to prevent infinite loop
+                    wait_time = (2 ** retry_count) + random.uniform(0, 1)  # Exponential backoff with jitter
+                    logging.warning(f"Rate limit hit, retrying after {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                    return self.controlled_request(method, url, headers, params, data, retry_count + 1)
+                else:
+                    logging.error("Rate limit hit repeatedly, stopping retries.")
+                    return None
             return response
         except requests.exceptions.RequestException as e:
             logging.error("HTTP Request failed: %s", e)
@@ -417,8 +422,7 @@ class Component(ComponentBase):
                     'quantity_shipped': item['QuantityShipped']
                 }
                 for charge in item['ItemChargeList']:
-                    charge_type_snake = self.camel_to_snake(
-                        charge['ChargeType'])
+                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
                     row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
                     row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
 
@@ -454,7 +458,7 @@ class Component(ComponentBase):
             logging.warning(
                 f"No data available to write to {file_name}. DataFrame is empty.")
 
-    def create_and_download_ads_report(self, scope,country):
+    def create_and_download_ads_report(self, scope, country):
         report_id = self.create_ads_report(scope)
         if report_id:
             report_url = self.poll_ads_report_status(report_id, scope)
@@ -502,8 +506,8 @@ class Component(ComponentBase):
             'Authorization': f'Bearer {self.ads_access_token}'
         }
         while True:
-            response = requests.get(url, headers=headers)
-            if response.status_code == 200:
+            response = self.controlled_request('get', url, headers=headers)
+            if response and response.status_code == 200:
                 status = response.json().get('status')
                 logging.info(f"Report status: {status}")
                 if status == 'COMPLETED':
@@ -521,8 +525,8 @@ class Component(ComponentBase):
 
     def download_ads_report(self, report_url):
         # Download the Amazon Ads report
-        response = requests.get(report_url)
-        if response.status_code == 200:
+        response = self.controlled_request('get', report_url)
+        if response and response.status_code == 200:
             content = gzip.decompress(response.content)
             return json.loads(content.decode('utf-8'))
         else:
