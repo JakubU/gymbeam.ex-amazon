@@ -11,7 +11,6 @@ import xml.etree.ElementTree as ET
 import warnings
 import re
 import random
-import os
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -27,8 +26,8 @@ KEY_APP_ID_ADS = '#app_id_ads'
 KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 
 # Set the data directory for local testing
-if not os.path.exists('/data/'):
-    os.environ['KBC_DATADIR'] = './data'
+#if not os.path.exists('/data/'):
+#    os.environ['KBC_DATADIR'] = './data'
 
 class Component(ComponentBase):
     def __init__(self):
