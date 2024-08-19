@@ -79,12 +79,12 @@ class Component(ComponentBase):
             logging.info(f"Fetching data from {start_date} to {end_date}")
 
             # Call report processing functions for different ad products
-            #self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_PRODUCTS", start_date, end_date)
-            #self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_PRODUCTS", start_date, end_date)
+            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_PRODUCTS", start_date, end_date)
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_PRODUCTS", start_date, end_date)
 
             # Additional reports for other ad products
-            #self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_BRANDS", start_date, end_date)
-            #self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_BRANDS", start_date, end_date)
+            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_BRANDS", start_date, end_date)
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_BRANDS", start_date, end_date)
 
             self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_DISPLAY", start_date, end_date)
             self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_DISPLAY", start_date, end_date)
