@@ -56,44 +56,31 @@ class Component(ComponentBase):
         self.app_id = params.get(KEY_APP_ID)
         self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
         self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
-        self.date_range = int(params.get(KEY_DATE_RANGE, 60))  # Assuming a max date range of 60 days to handle larger requests
+        self.date_range = int(params.get(KEY_DATE_RANGE, 7))
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
         self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
 
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
-        #if self.access_token:
-        #    self.handle_orders()
-        #    self.handle_returns()
-        #    self.handle_finances()
-    # Define the full date range for historical data, e.g., 180 days
-        full_date_range = 60  # Example: 180 days to fetch historical data
-        current_date = datetime.utcnow()
+        if self.access_token:
+            self.handle_orders()
+            self.handle_returns()
+            self.handle_finances()
+        if self.ads_access_token:
+            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_PRODUCTS")  # Italy
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_PRODUCTS")  # Germany
 
-        # Process historical data in 31-day increments
-        while full_date_range > 0:
-            days_to_fetch = min(full_date_range, 31)
-            start_date = (current_date - timedelta(days=days_to_fetch)).strftime('%Y-%m-%d')
-            end_date = current_date.strftime('%Y-%m-%d')
-            logging.info(f"Fetching data from {start_date} to {end_date}")
+            # New Reports
+            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_BRANDS")  # Italy
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_BRANDS")  # Germany
 
-            # Call report processing functions for different ad products
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_PRODUCTS", start_date, end_date)
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_PRODUCTS", start_date, end_date)
+            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_DISPLAY")  # Italy
+            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_DISPLAY")  # Germany
 
-            # Additional reports for other ad products
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_BRANDS", start_date, end_date)
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_BRANDS", start_date, end_date)
-
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_DISPLAY", start_date, end_date)
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_DISPLAY", start_date, end_date)
-
-            # Move the current date back by the number of days fetched
-            current_date -= timedelta(days=days_to_fetch)
-            full_date_range -= days_to_fetch
-
-        self.save_ads_data_to_csv()
+            self.save_ads_data_to_csv()
+        else:
+            logging.error("Failed to refresh token and could not proceed.")
 
     def handle_orders(self):
         # Fetch and process order data
@@ -478,12 +465,14 @@ class Component(ComponentBase):
             logging.warning(
                 f"No data available to write to {file_name}. DataFrame is empty.")
 
-    def create_and_download_ads_report(self, scope, country, ad_product, start_date, end_date):
-        logging.info(f"Creating report for ad product: {ad_product} in country: {country} from {start_date} to {end_date}")
-        report_id = self.create_ads_report(scope, ad_product, start_date, end_date)
+    def create_and_download_ads_report(self, scope, country, ad_product):
+        logging.info(f"Starting report creation for ad product: {ad_product} in country: {country}")
+        report_id = self.create_ads_report(scope, ad_product)
         if report_id:
+            logging.info(f"Report created successfully for {ad_product} in {country} with ID: {report_id}")
             report_url = self.poll_ads_report_status(report_id, scope)
             if report_url:
+                logging.info(f"Downloading report for {ad_product} in {country}")
                 report_data = self.download_ads_report(report_url)
                 self.process_ads_data(report_data, country, ad_product)
             else:
@@ -491,7 +480,7 @@ class Component(ComponentBase):
         else:
             logging.error(f"Failed to create report for {ad_product} in {country}")
 
-    def create_ads_report(self, scope, ad_product, start_date, end_date):
+    def create_ads_report(self, scope, ad_product):
         # Create an Amazon Ads report
         url = 'https://advertising-api-eu.amazon.com/reporting/reports'
         headers = {
@@ -500,20 +489,49 @@ class Component(ComponentBase):
             'Amazon-Advertising-API-Scope': scope,
             'Authorization': f'Bearer {self.ads_access_token}'
         }
-
-        payload = {
-            "name": f"{ad_product} report from {start_date} to {end_date}",
-            "startDate": start_date,
-            "endDate": end_date,
-            "configuration": {
-                "adProduct": ad_product,
-                "groupBy": ["campaign"],
-                "columns": ["campaignId", "campaignName", "impressions", "date", "clicks", "cost"],
-                "reportTypeId": "spCampaigns" if ad_product == "SPONSORED_PRODUCTS" else "sbCampaigns" if ad_product == "SPONSORED_BRANDS" else "sdCampaigns",
-                "timeUnit": "DAILY",
-                "format": "GZIP_JSON"
+        
+        if ad_product == "SPONSORED_PRODUCTS":
+            payload = {
+                "name": "SP advertised product report",
+                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
+                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
+                "configuration": {
+                    "adProduct": "SPONSORED_PRODUCTS",
+                    "groupBy": ["campaign"],
+                    "columns": ["campaignId", "campaignName", "impressions", "date", "clicks", "cost"],
+                    "reportTypeId": "spCampaigns",
+                    "timeUnit": "DAILY",
+                    "format": "GZIP_JSON"
+                }
             }
-        }
+        elif ad_product == "SPONSORED_BRANDS":
+            payload = {
+                "name": "SB advertised product report",
+                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
+                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
+                "configuration": {
+                    "adProduct": "SPONSORED_BRANDS",
+                    "groupBy": ["campaign"],
+                    "columns": ["campaignId", "campaignName", "date", "impressions", "clicks", "cost"],
+                    "reportTypeId": "sbCampaigns",
+                    "timeUnit": "DAILY",
+                    "format": "GZIP_JSON"
+                }
+            }
+        elif ad_product == "SPONSORED_DISPLAY":
+            payload = {
+                "name": "SD advertised product report",
+                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
+                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
+                "configuration": {
+                    "adProduct": "SPONSORED_DISPLAY",
+                    "groupBy": ["campaign"],
+                    "columns": ["campaignId", "campaignName", "date", "impressions", "clicks", "cost"],
+                    "reportTypeId": "sdCampaigns",
+                    "timeUnit": "DAILY",
+                    "format": "GZIP_JSON"
+                }
+            }
 
         response = requests.post(url, headers=headers, json=payload)
         if response.status_code == 200:
