@@ -29,13 +29,11 @@ KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 #if not os.path.exists('/data/'):
 #    os.environ['KBC_DATADIR'] = './data'
 
+
 class Component(ComponentBase):
     def __init__(self):
         super().__init__()
         self.setup_logging()
-        self.all_orders_data = pd.DataFrame()
-        self.all_returns_data = pd.DataFrame()
-        self.all_financial_data = pd.DataFrame()
         self.all_ads_data = pd.DataFrame()
 
     def setup_logging(self):
@@ -84,6 +82,7 @@ class Component(ComponentBase):
 
     def handle_orders(self):
         # Fetch and process order data
+        self.all_orders_data = pd.DataFrame()
         order_segments = self.split_date_range(self.date_range, 28)
         # Initialize a DataFrame to hold all orders data.
         all_orders_data = pd.DataFrame()
@@ -108,6 +107,7 @@ class Component(ComponentBase):
 
     def handle_returns(self):
         # Fetch and process return data
+        self.all_returns_data = pd.DataFrame()
         return_segments = self.split_date_range(self.date_range, 50)
         all_returns_data = pd.DataFrame()
         for start_date, end_date in return_segments:
@@ -130,6 +130,7 @@ class Component(ComponentBase):
 
     def handle_finances(self):
         # Fetch and process financial data
+        self.all_financial_data = pd.DataFrame()
         financial_data = self.fetch_financial_events()
         # Initialize the dataframe to hold all data.
         all_financial_data = pd.DataFrame()
