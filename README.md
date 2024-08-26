@@ -40,6 +40,8 @@ This component is specifically developed to manage data flows from Amazon's API 
 - **Orders**: Fetches order details within a specified date range.
 - **Returns**: Retrieves return information associated with orders.
 - **Financial Events**: Gathers financial transactions and adjustments.
+- **Amazon Ads Reports**: Extracts data from the Amazon Advertising API, including Sponsored Products, Sponsored Brands, and Sponsored Display campaigns.
+
 
 For additional endpoints, submit a request at [ideas.keboola.com](https://ideas.keboola.com/).
 
@@ -50,6 +52,27 @@ For additional endpoints, submit a request at [ideas.keboola.com](https://ideas.
 - **client_secret_id**: The client secret tied to your Amazon application.
 - **marketplace_id**: The Amazon marketplace ID relevant to your data.
 - **date_range**: Number of days from the current date for which to pull historical data.
+
+### Amazon Ads Configuration
+
+- **refresh_token_ads**: Your Amazon Ads API refresh token.
+- **app_id_ads**: The application ID for accessing Amazon Ads.
+- **client_secret_id_ads**: The client secret for your Amazon Ads application.
+- **stores**: A list of stores and their respective `Amazon-Advertising-API-Scope` values. This parameter allows you to configure multiple stores and retrieve data from each one.
+
+#### Example Configuration for Stores:
+
+```json
+"stores": [
+    {
+      "name": "Amazon.it",
+      "scope": "665807000098197"
+    },
+    {
+      "name": "Amazon.de",
+      "scope": "2780716582721957"
+    }
+]
 
 ## Output
 
