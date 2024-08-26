@@ -48,6 +48,28 @@
     "title": "LWA Client ID (Amazon Ads)",
     "format": "password",
     "propertyOrder": 7
-  }
+  },
+  "stores": {
+      "type": "array",
+      "title": "Stores",
+      "description": "List of Amazon stores with their respective Advertising API Scopes",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Store Name",
+            "description": "Name of the store, e.g., Amazon.it"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Amazon-Advertising-API-Scope",
+            "description": "The Advertising API Scope for the specific store"
+          }
+        },
+        "required": ["name", "scope"]
+      },
+      "propertyOrder": 9
+    }
 }
 }
