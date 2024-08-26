@@ -24,6 +24,7 @@ KEY_DATE_RANGE = 'date_range'
 KEY_REFRESH_TOKEN_ADS = '#refresh_token_ads'
 KEY_APP_ID_ADS = '#app_id_ads'
 KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
+KEY_STORES = 'stores'
 
 # Set the data directory for local testing
 #if not os.path.exists('/data/'):
@@ -58,6 +59,7 @@ class Component(ComponentBase):
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
         self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
+        self.stores = params.get(KEY_STORES, [])
 
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
@@ -66,15 +68,12 @@ class Component(ComponentBase):
             self.handle_returns()
             self.handle_finances()
         if self.ads_access_token:
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_PRODUCTS")  # Italy
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_PRODUCTS")  # Germany
-
-            # New Reports
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_BRANDS")  # Italy
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_BRANDS")  # Germany
-
-            self.create_and_download_ads_report("665807000098197", "Amazon.it", "SPONSORED_DISPLAY")  # Italy
-            self.create_and_download_ads_report("2780716582721957", "Amazon.de", "SPONSORED_DISPLAY")  # Germany
+            for store in self.stores:
+                store_name = store['name']
+                scope = store['scope']
+                self.create_and_download_ads_report(scope, store_name, "SPONSORED_PRODUCTS")
+                self.create_and_download_ads_report(scope, store_name, "SPONSORED_BRANDS")
+                self.create_and_download_ads_report(scope, store_name, "SPONSORED_DISPLAY")
 
             self.save_ads_data_to_csv()
         else:
@@ -490,49 +489,10 @@ class Component(ComponentBase):
             'Amazon-Advertising-API-Scope': scope,
             'Authorization': f'Bearer {self.ads_access_token}'
         }
-        
-        if ad_product == "SPONSORED_PRODUCTS":
-            payload = {
-                "name": "SP advertised product report",
-                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
-                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
-                "configuration": {
-                    "adProduct": "SPONSORED_PRODUCTS",
-                    "groupBy": ["campaign"],
-                    "columns": ["campaignId", "campaignName", "impressions", "date", "clicks", "cost"],
-                    "reportTypeId": "spCampaigns",
-                    "timeUnit": "DAILY",
-                    "format": "GZIP_JSON"
-                }
-            }
-        elif ad_product == "SPONSORED_BRANDS":
-            payload = {
-                "name": "SB advertised product report",
-                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
-                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
-                "configuration": {
-                    "adProduct": "SPONSORED_BRANDS",
-                    "groupBy": ["campaign"],
-                    "columns": ["campaignId", "campaignName", "date", "impressions", "clicks", "cost"],
-                    "reportTypeId": "sbCampaigns",
-                    "timeUnit": "DAILY",
-                    "format": "GZIP_JSON"
-                }
-            }
-        elif ad_product == "SPONSORED_DISPLAY":
-            payload = {
-                "name": "SD advertised product report",
-                "startDate": (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d'),
-                "endDate": datetime.utcnow().strftime('%Y-%m-%d'),
-                "configuration": {
-                    "adProduct": "SPONSORED_DISPLAY",
-                    "groupBy": ["campaign"],
-                    "columns": ["campaignId", "campaignName", "date", "impressions", "clicks", "cost"],
-                    "reportTypeId": "sdCampaigns",
-                    "timeUnit": "DAILY",
-                    "format": "GZIP_JSON"
-                }
-            }
+
+        start_date = (datetime.utcnow() - timedelta(days=10)).strftime('%Y-%m-%d')
+        end_date = datetime.utcnow().strftime('%Y-%m-%d')
+        payload = self.generate_payload(ad_product, start_date, end_date)
 
         response = requests.post(url, headers=headers, json=payload)
         if response.status_code == 200:
@@ -542,6 +502,33 @@ class Component(ComponentBase):
         else:
             logging.error(f"Failed to create Amazon Ads report: {response.text}")
             return None
+
+    def generate_payload(self, ad_product, start_date, end_date):
+        base_payload = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "configuration": {
+                "groupBy": ["campaign"],
+                "columns": ["campaignId", "campaignName", "date", "impressions", "clicks", "cost"],
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON"
+            }
+        }
+
+        if ad_product == "SPONSORED_PRODUCTS":
+            base_payload["name"] = "SP advertised product report"
+            base_payload["configuration"]["adProduct"] = "SPONSORED_PRODUCTS"
+            base_payload["configuration"]["reportTypeId"] = "spCampaigns"
+        elif ad_product == "SPONSORED_BRANDS":
+            base_payload["name"] = "SB advertised product report"
+            base_payload["configuration"]["adProduct"] = "SPONSORED_BRANDS"
+            base_payload["configuration"]["reportTypeId"] = "sbCampaigns"
+        elif ad_product == "SPONSORED_DISPLAY":
+            base_payload["name"] = "SD advertised product report"
+            base_payload["configuration"]["adProduct"] = "SPONSORED_DISPLAY"
+            base_payload["configuration"]["reportTypeId"] = "sdCampaigns"
+
+        return base_payload
 
     def poll_ads_report_status(self, report_id, scope):
         # Poll the status of the Amazon Ads report
