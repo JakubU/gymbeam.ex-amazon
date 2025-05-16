@@ -13,43 +13,43 @@
       "description": "Enter the date range as a number of days. This field specifies the duration from today back to the number of days you enter. For example, if you input '7', it will retrieve data from the past week up to today.",
       "propertyOrder": 8
     },
-  "#refresh_token": {
-    "type": "string",
-    "title": "Amazon Refresh Token (Amazon Seller Central)",
-    "format": "password",
-    "propertyOrder": 2
-  },
-  "#app_id": {
-    "type": "string",
-    "title": "LWA App ID (Amazon Seller Central)",
-    "format": "password",
-    "propertyOrder": 3
-  },
-  "#client_secret_id": {
-    "type": "string",
-    "title": "LWA Client ID (Amazon Seller Central)",
-    "format": "password",
-    "propertyOrder": 4
-  },
-  "#refresh_token_ads": {
-    "type": "string",
-    "title": "Amazon Refresh Token (Amazon Ads)",
-    "format": "password",
-    "propertyOrder": 5
-  },
-  "#app_id_ads": {
-    "type": "string",
-    "title": "LWA App ID (Amazon Ads)",
-    "format": "password",
-    "propertyOrder": 6
-  },
-  "#client_secret_id_ads": {
-    "type": "string",
-    "title": "LWA Client ID (Amazon Ads)",
-    "format": "password",
-    "propertyOrder": 7
-  },
-  "stores": {
+    "#refresh_token": {
+      "type": "string",
+      "title": "Amazon Refresh Token (Amazon Seller Central)",
+      "format": "password",
+      "propertyOrder": 2
+    },
+    "#app_id": {
+      "type": "string",
+      "title": "LWA App ID (Amazon Seller Central)",
+      "format": "password",
+      "propertyOrder": 3
+    },
+    "#client_secret_id": {
+      "type": "string",
+      "title": "LWA Client ID (Amazon Seller Central)",
+      "format": "password",
+      "propertyOrder": 4
+    },
+    "#refresh_token_ads": {
+      "type": "string",
+      "title": "Amazon Refresh Token (Amazon Ads)",
+      "format": "password",
+      "propertyOrder": 5
+    },
+    "#app_id_ads": {
+      "type": "string",
+      "title": "LWA App ID (Amazon Ads)",
+      "format": "password",
+      "propertyOrder": 6
+    },
+    "#client_secret_id_ads": {
+      "type": "string",
+      "title": "LWA Client ID (Amazon Ads)",
+      "format": "password",
+      "propertyOrder": 7
+    },
+    "stores": {
       "type": "array",
       "title": "Stores",
       "description": "List of Amazon stores with their respective Advertising API Scopes",
@@ -70,6 +70,56 @@
         "required": ["name", "scope"]
       },
       "propertyOrder": 9
+    },
+    "inventory_fba": {
+      "type": "object",
+      "title": "FBA Inventory",
+      "description": "Settings for daily extraction of FBA inventory across specified Marketplaces.",
+      "properties": {
+        "marketplace_ids": {
+          "type": "array",
+          "title": "Marketplace IDs",
+          "description": "List of Amazon Marketplace IDs for which to pull the daily FBA inventory.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "propertyOrder": 10
+    },
+    "execution": {
+      "type": "object",
+      "title": "Which steps to run",
+      "description": "Toggle individual extraction steps on or off",
+      "properties": {
+        "run_inventory": {
+          "type": "boolean",
+          "title": "Run FBA Inventory",
+          "default": true
+        },
+        "run_orders": {
+          "type": "boolean",
+          "title": "Run FBM Orders",
+          "default": true
+        },
+        "run_returns": {
+          "type": "boolean",
+          "title": "Run FBM Returns",
+          "default": true
+        },
+        "run_finances": {
+          "type": "boolean",
+          "title": "Run FBM Finances",
+          "default": true
+        },
+        "run_ads": {
+          "type": "boolean",
+          "title": "Run Amazon Ads Reports",
+          "default": true
+        }
+      },
+      "propertyOrder": 11
     }
-}
+  }
 }

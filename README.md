@@ -2,7 +2,7 @@
 
 ## Description
 
-This component facilitates the extraction of financial, orders, and returns data from the Amazon Selling Partner API. It is designed to be deployed within the Keboola Connection (KBC) ecosystem, leveraging its processing capabilities to handle API data efficiently.
+This component facilitates the extraction of FBA inventory snapshots, FBM orders, returns, financial events, and Amazon Advertising reports from the Amazon Selling Partner and Advertising APIs. It is designed to be deployed within the Keboola Connection (KBC) ecosystem, leveraging its processing capabilities to handle API data efficiently.
 
 ## Table of Contents
 
@@ -11,79 +11,124 @@ This component facilitates the extraction of financial, orders, and returns data
 - [Features](#features)
 - [Supported Endpoints](#supported-endpoints)
 - [Configuration](#configuration)
+- [Execution Flags](#execution-flags)
 - [Output](#output)
 - [Development](#development)
 - [Integration](#integration)
 
 ## Functionality Notes
 
-This component is specifically developed to manage data flows from Amazon's API into KBC, allowing for detailed analysis and storage.
+This component is developed to manage data flows from Amazon’s APIs into KBC, supporting both FBM and FBA use cases. It handles pagination, incremental loading, and offers toggles for each extraction step, ensuring efficient and customizable data pipelines.
 
 ## Prerequisites
 
-- **Amazon Seller Account**: Must have access to Amazon Seller Central.
-- **API Credentials**: Register your application with Amazon to obtain API credentials such as the `client_id`, `client_secret`, and `refresh_token`.
+- **Amazon Seller Account**: Access to Amazon Seller Central and Advertising Console.
+- **API Credentials**: Register your application with Amazon to obtain:
+  - `refresh_token`
+  - `app_id`
+  - `client_secret_id`
+  - `refresh_token_ads`
+  - `app_id_ads`
+  - `client_secret_id_ads`
 
 ## Features
 
-| **Feature**              | **Description**                                   |
-|--------------------------|---------------------------------------------------|
-| Authentication           | OAuth authentication with refresh token mechanism |
-| Incremental Loading      | Supports incremental data fetch to reduce load    |
-| Date Range Filter        | Customizable date range for data extraction       |
-| Dynamic Configuration    | Configuration can be dynamically adjusted         |
-| Supported API Endpoints  | Handles multiple API endpoints                    |
-| Error Handling           | Robust error handling and logging                 |
+| **Feature**              | **Description**                                                |
+|--------------------------|----------------------------------------------------------------|
+| FBA Inventory Snapshots  | Daily full snapshots of inventory with pagination support      |
+| FBM Orders               | Incremental orders extraction using customizable date ranges   |
+| FBM Returns              | Incremental returns extraction with XML detail                 |
+| FBM Financial Events     | Paged retrieval of financial transactions and adjustments     |
+| Amazon Ads Reports       | Sponsored Products, Brands, and Display campaign reports      |
+| Execution Flags          | Toggle each extraction step on or off                         |
+| Multiple Marketplaces    | Configure multiple FBA marketplaces and a single FBM endpoint |
+| Robust Error Handling    | Retries with exponential backoff and detailed logging         |
 
 ## Supported Endpoints
 
-- **Orders**: Fetches order details within a specified date range.
-- **Returns**: Retrieves return information associated with orders.
-- **Financial Events**: Gathers financial transactions and adjustments.
-- **Amazon Ads Reports**: Extracts data from the Amazon Advertising API, including Sponsored Products, Sponsored Brands, and Sponsored Display campaigns.
+- **FBA Inventory**: `/fba/inventory/v1/summaries`
+- **All Orders (Flat File)**: `GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL`
+- **Returns (XML)**: `GET_XML_RETURNS_DATA_BY_RETURN_DATE`
+- **Financial Events**: `/finances/v0/financialEvents`
+- **Amazon Ads Reporting**: `POST /reporting/reports` and `GET /reporting/reports/{reportId}`
 
-
-For additional endpoints, submit a request at [ideas.keboola.com](https://ideas.keboola.com/).
+For additional endpoint support, submit a request at [ideas.keboola.com](https://ideas.keboola.com/).
 
 ## Configuration
 
-- **refresh_token**: Your Amazon API refresh token.
-- **app_id**: The application ID received from Amazon upon app registration.
-- **client_secret_id**: The client secret tied to your Amazon application.
-- **marketplace_id**: The Amazon marketplace ID relevant to your data.
-- **date_range**: Number of days from the current date for which to pull historical data.
+Define parameters in `config.json` or via the KBC UI under **Parameters**:
+
+```json
+{
+  "marketplace_id": "<FBM Marketplace ID>",
+  "#refresh_token": "<Seller Central refresh token>",
+  "#app_id": "<LWA App ID>",
+  "#client_secret_id": "<LWA Client Secret>",
+  "date_range": "<days back for FBM orders/returns/finances>",
+
+  "#refresh_token_ads": "<Ads API refresh token>",
+  "#app_id_ads": "<Ads LWA App ID>",
+  "#client_secret_id_ads": "<Ads LWA Client Secret>",
+  "stores": [
+    { "name": "Amazon.it", "scope": "<Ads Scope>" },
+    { "name": "Amazon.de", "scope": "<Ads Scope>" }
+  ],
+
+  "inventory_fba": {
+    "marketplace_ids": ["A1PA6795UKMFR9", "ATVPDKIKX0DER"]
+  },
+
+  "execution": {
+    "run_inventory": true,
+    "run_orders": true,
+    "run_returns": true,
+    "run_finances": true,
+    "run_ads": true
+  }
+}
+```
 
 ### Amazon Ads Configuration
 
-- **refresh_token_ads**: Your Amazon Ads API refresh token.
-- **app_id_ads**: The application ID for accessing Amazon Ads.
-- **client_secret_id_ads**: The client secret for your Amazon Ads application.
-- **stores**: A list of stores and their respective `Amazon-Advertising-API-Scope` values. This parameter allows you to configure multiple stores and retrieve data from each one.
+- **stores**: A list of store objects:
+  ```json
+  "stores": [
+    { "name": "Amazon.it", "scope": "665807000098197" },
+    { "name": "Amazon.de", "scope": "2780716582721957" }
+  ]
+  ```
 
-#### Example Configuration for Stores:
+## Execution Flags
 
-```json
-"stores": [
-    {
-      "name": "Amazon.it",
-      "scope": "665807000098197"
-    },
-    {
-      "name": "Amazon.de",
-      "scope": "2780716582721957"
-    }
-]
+Toggle individual extraction steps under the **execution** section:
+
+- `run_inventory`: Execute FBA inventory snapshot
+- `run_orders`: Execute FBM orders extraction
+- `run_returns`: Execute FBM returns extraction
+- `run_finances`: Execute FBM financial events extraction
+- `run_ads`: Execute Amazon Ads report extraction
 
 ## Output
 
-The output will be a set of tables uploaded to KBC, structured according to the data schema of the fetched API data. This includes details on orders, returns, and financial events.
+The component produces the following tables in KBC:
+
+- `inventory.csv` (FBA inventory snapshots)
+- `orders.csv` (FBM orders)
+- `returns.csv` (FBM returns)
+- `finance.csv` (FBM financial events)
+- `advertising.csv` (Amazon Ads reports)
 
 ## Development
 
 Set up your development environment by cloning the repository and running the component:
 
 ```bash
-git clone https://github.com/JakubU/gymbeam.ex-amazon gymbeam.ex-amazon
+git clone https://github.com/JakubU/gymbeam.ex-amazon.git
 cd gymbeam.ex-amazon
 docker-compose build
 docker-compose run --rm dev
+```
+
+## Integration
+
+This component can be integrated within bigger ETL workflows in KBC. Use KBC orchestration to schedule and chain this extractor with transformations, writers, and other components for end-to-end data pipelines.

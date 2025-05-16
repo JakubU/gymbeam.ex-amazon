@@ -19,12 +19,24 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 KEY_REFRESH_TOKEN = '#refresh_token'
 KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
-KEY_MARKETPLACE_ID = 'marketplace_id'
+KEY_MARKETPLACE_ID = 'marketplace_id' # FBM marketplace ID for orders/returns/finances
 KEY_DATE_RANGE = 'date_range'
 KEY_REFRESH_TOKEN_ADS = '#refresh_token_ads'
 KEY_APP_ID_ADS = '#app_id_ads'
 KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 KEY_STORES = 'stores'
+
+# FBA inventory configuration keys
+KEY_INVENTORY_FBA = 'inventory_fba'
+KEY_INVENTORY_FBA_MARKETPLACE_IDS = 'marketplace_ids'  # list of FBA marketplaces for inventory
+
+# Execution flags
+KEY_RUN_INVENTORY = 'run_inventory'
+KEY_RUN_ORDERS = 'run_orders'
+KEY_RUN_RETURNS = 'run_returns'
+KEY_RUN_FINANCES = 'run_finances'
+KEY_RUN_ADS = 'run_ads'
+
 
 # Set the data directory for local testing
 #if not os.path.exists('/data/'):
@@ -49,35 +61,65 @@ class Component(ComponentBase):
         return date.strftime(date_format)
 
     def run(self):
-        # Main execution method called to process data
         params = self.configuration.parameters
+        # Seller Central credentials
         self.refresh_token = params.get(KEY_REFRESH_TOKEN)
         self.app_id = params.get(KEY_APP_ID)
         self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
+        # FBM marketplace ID
         self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
+        # Date range
         self.date_range = int(params.get(KEY_DATE_RANGE, 7))
+        # Execution flags (default True)
+        self.run_inventory = params.get(KEY_RUN_INVENTORY, True)
+        self.run_orders = params.get(KEY_RUN_ORDERS, True)
+        self.run_returns = params.get(KEY_RUN_RETURNS, True)
+        self.run_finances = params.get(KEY_RUN_FINANCES, True)
+        self.run_ads = params.get(KEY_RUN_ADS, True)
+
+        # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
         self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
         self.stores = params.get(KEY_STORES, [])
+        # FBA inventory config: marketplaces
+        inventory_cfg = params.get(KEY_INVENTORY_FBA, {})
+        self.marketplace_ids = inventory_cfg.get(KEY_INVENTORY_FBA_MARKETPLACE_IDS, [])
 
+        # Refresh tokens
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
-        if self.access_token:
-            self.handle_orders()
-            self.handle_returns()
-            self.handle_finances()
-        if self.ads_access_token:
-            for store in self.stores:
-                store_name = store['name']
-                scope = store['scope']
-                self.create_and_download_ads_report(scope, store_name, "SPONSORED_PRODUCTS")
-                self.create_and_download_ads_report(scope, store_name, "SPONSORED_BRANDS")
-                self.create_and_download_ads_report(scope, store_name, "SPONSORED_DISPLAY")
 
-            self.save_ads_data_to_csv()
+        if getattr(self, 'access_token', None):
+            # Conditional execution
+            if self.run_inventory:
+                logging.info('Executing FBA inventory snapshot...')
+                self.handle_inventory()
+            if self.run_orders:
+                logging.info('Executing FBM orders...')
+                self.handle_orders()
+            if self.run_returns:
+                logging.info('Executing FBM returns...')
+                self.handle_returns()
+            if self.run_finances:
+                logging.info('Executing FBM finances...')
+                self.handle_finances()
         else:
-            logging.error("Failed to refresh token and could not proceed.")
+            logging.error('Failed to refresh Seller Central token.')
+
+        # Ads reports always optional
+        if self.run_ads:
+            if getattr(self, 'ads_access_token', None):
+                logging.info('Executing Amazon Ads reports...')
+                for store in self.stores:
+                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_PRODUCTS')
+                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_BRANDS')
+                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_DISPLAY')
+                self.save_ads_data_to_csv()
+            else:
+                logging.error('Failed to refresh Ads token.')
+        else:
+            logging.info('Skipping Amazon Ads reports as per configuration.')
 
     def handle_orders(self):
         # Fetch and process order data
@@ -103,6 +145,65 @@ class Component(ComponentBase):
                               'amazon-order-id', 'sku', 'asin'])
         else:
             logging.warning("No order data to process.")
+
+    def handle_inventory(self):
+            """
+            Fetch and process daily FBA inventory for each configured marketplace.
+            Handles pagination via NextToken to retrieve all pages.
+            """
+            logging.info("Fetching daily FBA inventory for marketplaces: %s", self.marketplace_ids)
+            all_dfs = []
+            for mp in self.marketplace_ids:
+                logging.info("Starting inventory fetch for marketplace: %s", mp)
+                next_token = None
+                while True:
+                    url = "https://sellingpartnerapi-eu.amazon.com/fba/inventory/v1/summaries"
+                    headers = {
+                        'x-amz-access-token': self.access_token,
+                        'Content-Type': 'application/json'
+                    }
+                    params = {
+                        'marketplaceIds': mp,
+                        'granularityType': 'Marketplace',
+                        'granularityId': mp,
+                        'details': 'true'
+                    }
+                    if next_token:
+                        params['nextToken'] = next_token
+                    response = self.controlled_request('get', url, headers=headers, params=params)
+                    if not response or response.status_code != 200:
+                        logging.error(
+                            "FBA inventory fetch failed for %s: %s",
+                            mp,
+                            response.text if response else 'No response'
+                        )
+                        break
+
+                    data = response.json()
+                    summaries = data.get('payload', {}).get('inventorySummaries', [])
+                    if summaries:
+                        df = pd.json_normalize(summaries,sep='_')
+                        df.rename(columns=lambda x: self.camel_to_snake(x), inplace=True)
+                        df['marketplace_id'] = mp
+                        df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        all_dfs.append(df)
+
+                    # Check for pagination
+                    next_token = data.get('pagination', {}).get('nextToken')
+                    if not next_token:
+                        logging.info("Completed inventory pages for %s", mp)
+                        break
+
+            if all_dfs:
+                result = pd.concat(all_dfs, ignore_index=True)
+                self.process_data(
+                    result,
+                    'inventory.csv',
+                    primary_keys=['seller_sku', 'asin', 'marketplace_id']
+                )
+                logging.info("Total FBA inventory records: %d", len(result))
+            else:
+                logging.warning("No FBA inventory data fetched.")
 
     def handle_returns(self):
         # Fetch and process return data
