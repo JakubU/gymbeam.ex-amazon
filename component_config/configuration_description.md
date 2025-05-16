@@ -51,11 +51,53 @@ Describes OAuth credentials setup for secure access:
 - Developers can clone and set up the component for customization. They can build upon existing functionalities or add support for additional endpoints as per user or business requirements.
 
 ### API Endpoints
-- The component handles data from multiple Amazon API endpoints related to orders, returns, and financial transactions. Each endpoint is selected based on the configuration parameters set by the user in KBC.
+- The component handles data from multiple Amazon API endpoints related to orders, returns,financial transactions and inventory FBA. Each endpoint is selected based on the configuration parameters set by the user in KBC.
 
 ## Integration
 
 The component is fully integrated into the KBC platform, allowing users to configure and schedule data extraction jobs directly from their KBC projects. It supports both manual and automated triggers for data synchronization.
+
+### FBA Inventory Configuration
+
+This section configures daily extraction of FBA inventory snapshots across one or more Amazon Marketplaces using the SP‑API `getInventorySummaries` endpoint (details: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries).
+
+- **inventory_fba.marketplace_ids** _(array[string], required)_: List of Amazon Marketplace IDs for which to pull inventory data.
+- **details**: Always set to `true` to retrieve detailed inventory fields.
+- **pagination**: Uses `nextToken` in response to fetch subsequent pages until exhausted.
+
+**Output Table**: `inventory.csv` includes the following key columns:
+
+| Column                       | Source Path                                                   | Description                                                     |
+|------------------------------|---------------------------------------------------------------|-----------------------------------------------------------------|
+| `asin`                       | `inventorySummaries[].asin`                                   | Amazon Standard Identification Number                           |
+| `fn_sku`                     | `inventorySummaries[].fnSku`                                  | Fulfillment network SKU (FNSKU)                                 |
+| `seller_sku`                 | `inventorySummaries[].sellerSku`                              | Seller-defined SKU                                              |
+| `condition`                  | `inventorySummaries[].condition`                              | Condition of the item (e.g., NewItem)                           |
+| `last_updated_time`          | `inventorySummaries[].lastUpdatedTime`                        | Timestamp of last update                                        |
+| `product_name`               | `inventorySummaries[].productName`                            | Title or name of the product                                    |
+| `total_quantity`             | `inventorySummaries[].totalQuantity`                          | Sum of all quantities (sellable + unsellable + in-transit)      |
+| `stores`                     | `inventorySummaries[].stores`                                 | Array of store codes where stock is available                   |
+| `marketplace_id`             | n/a                                                           | Marketplace ID used for this snapshot                           |
+| `extracted_at`               | n/a                                                           | ISO timestamp when extraction was performed                     |
+| `fulfillable_quantity`       | `inventoryDetails.fulfillableQuantity`                        | Quantity ready for sale                                         |
+| `inbound_working_quantity`   | `inventoryDetails.inboundWorkingQuantity`                     | Quantity currently being processed in inbound workflow          |
+| `inbound_shipped_quantity`   | `inventoryDetails.inboundShippedQuantity`                     | Quantity already shipped to FC, awaiting receiving confirmation |
+| `inbound_receiving_quantity` | `inventoryDetails.inboundReceivingQuantity`                   | Quantity in transit to FC                                       |
+| `total_reserved_quantity`    | `inventoryDetails.reservedQuantity.totalReservedQuantity`     | Quantity reserved for existing orders                           |
+| `pending_customer_order_quantity` | `inventoryDetails.reservedQuantity.pendingCustomerOrderQuantity` | Reserved for pending customer orders              |
+| `pending_transshipment_quantity`  | `inventoryDetails.reservedQuantity.pendingTransshipmentQuantity` | Reserved for cross-border transfers          |
+| `fc_processing_quantity`     | `inventoryDetails.reservedQuantity.fcProcessingQuantity`      | FC-internal processing reservations                             |
+| `total_researching_quantity` | `inventoryDetails.researchingQuantity.totalResearchingQuantity` | Quantity flagged for research or QA review           |
+| `researching_quantity_breakdown` | `inventoryDetails.researchingQuantity.researchingQuantityBreakdown` | Breakdown of researching quantities (list of name/quantity pairs) |
+| `total_unfulfillable_quantity` | `inventoryDetails.unfulfillableQuantity.totalUnfulfillableQuantity` | Quantity deemed unsellable (all reasons)     |
+| `customer_damaged_quantity`  | `inventoryDetails.unfulfillableQuantity.customerDamagedQuantity` | Unsellable due to customer damage      |
+| `warehouse_damaged_quantity` | `inventoryDetails.unfulfillableQuantity.warehouseDamagedQuantity` | Unsellable due to warehouse damage      |
+| `distributor_damaged_quantity` | `inventoryDetails.unfulfillableQuantity.distributorDamagedQuantity` | Unsellable due to distributor damage   |
+| `carrier_damaged_quantity`   | `inventoryDetails.unfulfillableQuantity.carrierDamagedQuantity` | Unsellable due to carrier damage           |
+| `defective_quantity`         | `inventoryDetails.unfulfillableQuantity.defectiveQuantity`    | Unsellable due to defects                                       |
+| `expired_quantity`           | `inventoryDetails.unfulfillableQuantity.expiredQuantity`      | Unsellable due to expiration                                     |
+
+This approach ensures column names are ≤ 64 characters and remain descriptive.For full API schema, see: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries
 
 ## Sample Configuration
 

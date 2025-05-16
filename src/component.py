@@ -37,7 +37,6 @@ KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
 KEY_RUN_ADS = 'run_ads'
 
-
 # Set the data directory for local testing
 #if not os.path.exists('/data/'):
 #    os.environ['KBC_DATADIR'] = './data'
@@ -59,6 +58,17 @@ class Component(ComponentBase):
         # Return a formatted string of the datetime days ago from now
         date = datetime.utcnow() - timedelta(days=days)
         return date.strftime(date_format)
+    
+    @staticmethod
+    def camel_to_snake(name: str) -> str:
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+    @staticmethod
+    def shorten_column(name: str) -> str:
+        token = re.split(r'[._]', name)[-1]
+        # token môže byť camelCase, preto opäť použijeme camel_to_snake
+        return Component.camel_to_snake(token)
 
     def run(self):
         params = self.configuration.parameters
@@ -71,11 +81,12 @@ class Component(ComponentBase):
         # Date range
         self.date_range = int(params.get(KEY_DATE_RANGE, 7))
         # Execution flags (default True)
-        self.run_inventory = params.get(KEY_RUN_INVENTORY, True)
-        self.run_orders = params.get(KEY_RUN_ORDERS, True)
-        self.run_returns = params.get(KEY_RUN_RETURNS, True)
-        self.run_finances = params.get(KEY_RUN_FINANCES, True)
-        self.run_ads = params.get(KEY_RUN_ADS, True)
+        exec_cfg = params.get('execution', {})
+        self.run_inventory = exec_cfg.get(KEY_RUN_INVENTORY, True)
+        self.run_orders = exec_cfg.get(KEY_RUN_ORDERS, True)
+        self.run_returns = exec_cfg.get(KEY_RUN_RETURNS, True)
+        self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
+        self.run_ads = exec_cfg.get(KEY_RUN_ADS, True)
 
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
@@ -183,7 +194,7 @@ class Component(ComponentBase):
                     summaries = data.get('payload', {}).get('inventorySummaries', [])
                     if summaries:
                         df = pd.json_normalize(summaries,sep='_')
-                        df.rename(columns=lambda x: self.camel_to_snake(x), inplace=True)
+                        df.rename(columns=lambda x: self.shorten_column(x), inplace=True)
                         df['marketplace_id'] = mp
                         df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
                         all_dfs.append(df)
