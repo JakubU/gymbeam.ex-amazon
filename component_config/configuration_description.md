@@ -99,6 +99,83 @@ This section configures daily extraction of FBA inventory snapshots across one o
 
 This approach ensures column names are ≤ 64 characters and remain descriptive.For full API schema, see: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries
 
+# GET_LEDGER_SUMMARY_VIEW_DATA
+
+Purpose: Aggregated financial summary over a period, akin to an inventory bank statement.
+
+Usage:
+
+```json
+{"reportType":"GET_LEDGER_SUMMARY_VIEW_DATA","reportOptions":{...}}
+```
+
+ReportOptions:
+
+- `aggregateByLocation`: COUNTRY (default) or FC.
+- `aggregatedByTimePeriod`: MONTHLY (default), WEEKLY, DAILY.
+- `FNSKU`: Filter to a specific fulfillment network SKU.
+- `MSKU`: Filter to a merchant SKU.
+- `ASIN`: Filter to an ASIN.
+
+Report Attributes:
+
+| Field                         | Description                                                  |
+|-------------------------------|--------------------------------------------------------------|
+| Date                          | Date boundary for the aggregated period.                     |
+| FNSKU                         | Fulfillment network SKU identifier.                          |
+| ASIN                          | Amazon Standard Identification Number.                       |
+| MSKU                          | Merchant SKU mapped to FNSKU(s).                             |
+| Title                         | Product name/title.                                          |
+| Disposition                   | Final disposition (e.g., Sale, Return, Adjustment).          |
+| StartingWarehouseBalance      | Inventory balance at period start.                           |
+| InTransitBetweenWarehouses    | Quantity moving between warehouses.                         |
+| Receipts                      | Total received units.                                        |
+| CustomerShipments             | Units shipped to customers.                                  |
+| CustomerReturns               | Units returned by customers.                                 |
+| VendorReturns                 | Units returned by vendor.                                    |
+| WarehouseTransferIn/Out       | Internal transfers in/out of warehouse.                      |
+| Found, Lost, Damaged, Disposed, OtherEvents | Various adjustments.                      |
+| EndingWarehouseBalance        | Inventory balance at period end.                             |
+| UnknownEvents                 | Events not categorized.                                      |
+| Location                      | COUNTRY or FC based on aggregation.                          |
+
+# GET_LEDGER_DETAIL_VIEW_DATA
+
+Purpose: Detailed, transaction-level ledger of inventory movements for the last 18 months.
+
+Usage:
+
+```json
+{"reportType":"GET_LEDGER_DETAIL_VIEW_DATA","reportOptions":{...}}
+```
+
+ReportOptions:
+
+- `eventType`: Filter for event types (Adjustments, CustomerReturns, Receipts, Shipments, VendorReturns, WhseTransfers). Default returns all.
+- `FNSKU`: Filter to a specific fulfillment network SKU.
+- `MSKU`: Filter to a merchant SKU.
+- `ASIN`: Filter to an ASIN.
+
+Report Attributes:
+
+| Field                 | Description                                               |
+|-----------------------|-----------------------------------------------------------|
+| Date                  | Timestamp of the event.                                   |
+| FNSKU                 | Fulfillment network SKU identifier.                       |
+| ASIN                  | Amazon Standard Identification Number.                    |
+| MSKU                  | Merchant SKU mapped to FNSKU(s).                          |
+| Title                 | Product name/title.                                       |
+| EventType             | Type of movement (Adjustments, Shipments, etc.).          |
+| ReferenceID           | Amazon transaction/order ID reference.                    |
+| Quantity              | Number of units in this event.                            |
+| FulfillmentCenter     | ID of the FC where the event occurred.                    |
+| Disposition           | Final disposition of the movement.                        |
+| Reason                | Reason code for the event (e.g., damage, disposal).       |
+| Country               | Country code of the FC.                                   |
+| ReconciledQuantity    | Quantity successfully reconciled.                         |
+| UnreconciledQuantity  | Quantity pending reconciliation.                          |
+```
+
 ## Sample Configuration
 
 ```json

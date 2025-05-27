@@ -19,7 +19,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 KEY_REFRESH_TOKEN = '#refresh_token'
 KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
-KEY_MARKETPLACE_ID = 'marketplace_id' # FBM marketplace ID for orders/returns/finances
+KEY_MARKETPLACE_ID = 'marketplace_id'  # FBM marketplace ID for orders/returns/finances
 KEY_DATE_RANGE = 'date_range'
 KEY_REFRESH_TOKEN_ADS = '#refresh_token_ads'
 KEY_APP_ID_ADS = '#app_id_ads'
@@ -37,11 +37,6 @@ KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
 KEY_RUN_ADS = 'run_ads'
 
-# Set the data directory for local testing
-#if not os.path.exists('/data/'):
-#    os.environ['KBC_DATADIR'] = './data'
-
-
 class Component(ComponentBase):
     def __init__(self):
         super().__init__()
@@ -49,7 +44,6 @@ class Component(ComponentBase):
         self.all_ads_data = pd.DataFrame()
 
     def setup_logging(self):
-        # Configure logging format and level
         logging.basicConfig(level=logging.INFO,
                             format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -58,7 +52,7 @@ class Component(ComponentBase):
         # Return a formatted string of the datetime days ago from now
         date = datetime.utcnow() - timedelta(days=days)
         return date.strftime(date_format)
-    
+
     @staticmethod
     def camel_to_snake(name: str) -> str:
         s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -67,7 +61,6 @@ class Component(ComponentBase):
     @staticmethod
     def shorten_column(name: str) -> str:
         token = re.split(r'[._]', name)[-1]
-        # token môže byť camelCase, preto opäť použijeme camel_to_snake
         return Component.camel_to_snake(token)
 
     def run(self):
@@ -76,24 +69,21 @@ class Component(ComponentBase):
         self.refresh_token = params.get(KEY_REFRESH_TOKEN)
         self.app_id = params.get(KEY_APP_ID)
         self.client_secret_id = params.get(KEY_CLIENT_SECRET_ID)
-        # FBM marketplace ID
+        # Marketplace and date range
         self.marketplace_id = params.get(KEY_MARKETPLACE_ID)
-        # Date range
         self.date_range = int(params.get(KEY_DATE_RANGE, 7))
-        # Execution flags (default True)
         exec_cfg = params.get('execution', {})
         self.run_inventory = exec_cfg.get(KEY_RUN_INVENTORY, True)
         self.run_orders = exec_cfg.get(KEY_RUN_ORDERS, True)
         self.run_returns = exec_cfg.get(KEY_RUN_RETURNS, True)
         self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
         self.run_ads = exec_cfg.get(KEY_RUN_ADS, True)
-
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
         self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
         self.stores = params.get(KEY_STORES, [])
-        # FBA inventory config: marketplaces
+        # FBA inventory marketplaces
         inventory_cfg = params.get(KEY_INVENTORY_FBA, {})
         self.marketplace_ids = inventory_cfg.get(KEY_INVENTORY_FBA_MARKETPLACE_IDS, [])
 
@@ -101,34 +91,53 @@ class Component(ComponentBase):
         self.refresh_amazon_token()
         self.refresh_amazon_ads_token()
 
-        if getattr(self, 'access_token', None):
-            # Conditional execution
-            if self.run_inventory:
-                logging.info('Executing FBA inventory snapshot...')
-                self.handle_inventory()
-            if self.run_orders:
-                logging.info('Executing FBM orders...')
-                self.handle_orders()
-            if self.run_returns:
-                logging.info('Executing FBM returns...')
-                self.handle_returns()
-            if self.run_finances:
-                logging.info('Executing FBM finances...')
-                self.handle_finances()
-        else:
+        if not getattr(self, 'access_token', None):
             logging.error('Failed to refresh Seller Central token.')
+            return
 
-        # Ads reports always optional
-        if self.run_ads:
-            if getattr(self, 'ads_access_token', None):
-                logging.info('Executing Amazon Ads reports...')
-                for store in self.stores:
-                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_PRODUCTS')
-                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_BRANDS')
-                    self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_DISPLAY')
-                self.save_ads_data_to_csv()
-            else:
-                logging.error('Failed to refresh Ads token.')
+        # Core flows
+        if self.run_inventory:
+            logging.info('Executing FBA inventory snapshot...')
+            self.handle_inventory()
+        if self.run_orders:
+            logging.info('Executing FBM orders...')
+            self.handle_orders()
+        if self.run_returns:
+            logging.info('Executing FBM returns...')
+            self.handle_returns()
+        if self.run_finances:
+            logging.info('Executing FBM finances...')
+            self.handle_finances()
+
+        # FBA ledger reports (detail and summary) need correct date ordering
+        logging.info('Generating FBA ledger detail and summary view reports...')
+        start_dt = datetime.utcnow() - timedelta(days=self.date_range)
+        end_dt = datetime.utcnow()
+
+        # Detail view report
+        detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA')
+        if detail_id:
+            df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'ledger_detail.csv', False, [])
+            if not df_detail.empty:
+                self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
+
+        # Summary view report
+        summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
+        if summary_id:
+            df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'ledger_summary.csv', False, [])
+            if not df_summary.empty:
+                self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
+
+        # Ads reports flow
+        if self.run_ads and getattr(self, 'ads_access_token', None):
+            logging.info('Executing Amazon Ads reports...')
+            for store in self.stores:
+                self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_PRODUCTS')
+                self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_BRANDS')
+                self.create_and_download_ads_report(store['scope'], store['name'], 'SPONSORED_DISPLAY')
+            self.save_ads_data_to_csv()
+        elif self.run_ads:
+            logging.error('Failed to refresh Ads token.')
         else:
             logging.info('Skipping Amazon Ads reports as per configuration.')
 
@@ -338,6 +347,27 @@ class Component(ComponentBase):
             return report_id
         else:
             logging.error("Failed to create report: %s", response.text)
+            return None
+
+    def create_ledger_report(self, start_date, end_date, report_type):
+            logging.info(f"Creating {report_type} ledger report from {start_date} to {end_date}")
+            url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
+            headers = {'Content-Type':'application/json','x-amz-access-token':self.access_token}
+            payload = {
+                'marketplaceIds':[self.marketplace_id],
+                'reportType':report_type,
+                'dataStartTime':start_date.isoformat(timespec='milliseconds')+'Z',
+                'dataEndTime':end_date.isoformat(timespec='milliseconds')+'Z'
+            }
+            if report_type=='GET_LEDGER_SUMMARY_VIEW_DATA':
+                payload['reportOptions']={
+                    'aggregatedByTimePeriod':'DAILY',
+                    'aggregateByLocation':'COUNTRY'
+                }
+            resp=requests.post(url, headers=headers, data=json.dumps(payload))
+            if resp.status_code==202:
+                return resp.json()['reportId']
+            logging.error(f"Failed to create ledger report: {resp.text}")
             return None
 
     def poll_report_status_and_download(self, report_id, data_frame, file_name, is_xml, primary_keys):
