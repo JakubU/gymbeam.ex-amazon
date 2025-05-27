@@ -117,14 +117,14 @@ class Component(ComponentBase):
         # Detail view report
         detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA')
         if detail_id:
-            df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'ledger_detail.csv', False, [])
+            df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
             if not df_detail.empty:
                 self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
 
         # Summary view report
         summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
         if summary_id:
-            df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'ledger_summary.csv', False, [])
+            df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'inventory_ledger_summary.csv', False, [])
             if not df_summary.empty:
                 self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
 
