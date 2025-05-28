@@ -119,6 +119,7 @@ class Component(ComponentBase):
         if detail_id:
             df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
             if not df_detail.empty:
+                df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
                 self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
 
         # Summary view report
@@ -126,6 +127,7 @@ class Component(ComponentBase):
         if summary_id:
             df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'inventory_ledger_summary.csv', False, [])
             if not df_summary.empty:
+                df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
                 self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
 
         # Ads reports flow
