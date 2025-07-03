@@ -98,6 +98,11 @@
           "title": "Run FBA Inventory",
           "default": true
         },
+        "run_inventory_planning": {
+          "type": "boolean",
+          "title": "Run FBA Inventory Planning",
+          "default": true
+        },
         "run_orders": {
           "type": "boolean",
           "title": "Run FBM Orders",
