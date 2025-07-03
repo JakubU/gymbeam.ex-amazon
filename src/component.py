@@ -32,6 +32,7 @@ KEY_INVENTORY_FBA_MARKETPLACE_IDS = 'marketplace_ids'  # list of FBA marketplace
 
 # Execution flags
 KEY_RUN_INVENTORY = 'run_inventory'
+KEY_RUN_INVENTORY_PLANNING = 'run_inventory_planning'
 KEY_RUN_ORDERS = 'run_orders'
 KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
@@ -74,6 +75,7 @@ class Component(ComponentBase):
         self.date_range = int(params.get(KEY_DATE_RANGE, 7))
         exec_cfg = params.get('execution', {})
         self.run_inventory = exec_cfg.get(KEY_RUN_INVENTORY, True)
+        self.run_inventory_planning = exec_cfg.get(KEY_RUN_INVENTORY_PLANNING, True)
         self.run_orders = exec_cfg.get(KEY_RUN_ORDERS, True)
         self.run_returns = exec_cfg.get(KEY_RUN_RETURNS, True)
         self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
@@ -99,6 +101,9 @@ class Component(ComponentBase):
         if self.run_inventory:
             logging.info('Executing FBA inventory snapshot...')
             self.handle_inventory()
+        if self.run_inventory_planning:
+            logging.info('Executing FBA inventory planning snapshot...')
+            self.handle_inventory_planning()
         if self.run_orders:
             logging.info('Executing FBM orders...')
             self.handle_orders()
@@ -227,6 +232,55 @@ class Component(ComponentBase):
             else:
                 logging.warning("No FBA inventory data fetched.")
 
+    def handle_inventory_planning(self):
+        """
+        Fetch and process FBA Inventory Planning data for each configured marketplace.
+        Uses SP-API report generation and download.
+        """
+        logging.info("Fetching FBA Inventory Planning data for marketplaces: %s", self.marketplace_ids)
+        all_dfs = []
+
+        for mp in self.marketplace_ids:
+            logging.info("Starting Inventory Planning report for marketplace: %s", mp)
+            planning_segments = self.split_date_range(self.date_range, 30)
+
+            for start_date, end_date in planning_segments:
+                report_id = self.create_report(
+                    start_date,
+                    end_date,
+                    "GET_FBA_INVENTORY_PLANNING_DATA", 
+                    marketplace_id=mp
+                )
+
+                if report_id:
+                    df = self.poll_report_status_and_download(
+                        report_id,
+                        pd.DataFrame(),
+                        'inventory_planning.csv',
+                        is_xml=False,
+                        primary_keys=['sku', 'asin']
+                    )
+
+                    if not df.empty:
+                        df.rename(columns=lambda x: self.shorten_column(x), inplace=True)
+                        df['marketplace_id'] = mp
+                        df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        all_dfs.append(df)
+                    else:
+                        logging.warning(f"No data for planning report in marketplace {mp} from {start_date} to {end_date}")
+                else:
+                    logging.warning(f"Failed to create planning report for marketplace {mp}")
+
+                report_id = None
+
+        if all_dfs:
+            combined = pd.concat(all_dfs, ignore_index=True)
+            logging.info("Total inventory planning records across marketplaces: %d", len(combined))
+            self.process_data(combined, 'inventory_planning.csv', ['snapshot-date', 'sku', 'asin', 'marketplace_id'])
+        else:
+            logging.warning("No FBA Inventory Planning data fetched from any marketplace.")
+
+
     def handle_returns(self):
         # Fetch and process return data
         self.all_returns_data = pd.DataFrame()
@@ -327,21 +381,23 @@ class Component(ComponentBase):
             total_days -= current_segment_length
         return segments
 
-    def create_report(self, start_date, end_date, report_type):
+    def create_report(self, start_date, end_date, report_type, marketplace_id=None):
         # Request a new report from Amazon SP-API
-        logging.info("Creating %s report from %s to %s",
-                     report_type, start_date, end_date)
+        used_marketplace_id = marketplace_id or self.marketplace_id
+        logging.info("Creating %s report from %s to %s for marketplace %s",
+                    report_type, start_date, end_date, used_marketplace_id)
         url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
         headers = {
             'Content-Type': 'application/json',
             'x-amz-access-token': self.access_token
         }
         payload = json.dumps({
-            "marketplaceIds": [self.marketplace_id],
+            "marketplaceIds": [used_marketplace_id],
             "reportType": report_type,
             "dataStartTime": end_date.isoformat(timespec='milliseconds') + 'Z',
             "dataEndTime": start_date.isoformat(timespec='milliseconds') + 'Z'
         })
+
         response = requests.post(url, headers=headers, data=payload)
         if response.status_code == 202:
             report_id = response.json().get('reportId')
