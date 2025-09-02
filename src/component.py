@@ -37,6 +37,7 @@ KEY_RUN_ORDERS = 'run_orders'
 KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
 KEY_RUN_ADS = 'run_ads'
+KEY_RUN_LEDGER = 'run_ledger'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -80,6 +81,7 @@ class Component(ComponentBase):
         self.run_returns = exec_cfg.get(KEY_RUN_RETURNS, True)
         self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
         self.run_ads = exec_cfg.get(KEY_RUN_ADS, True)
+        self.run_ledger = exec_cfg.get(KEY_RUN_LEDGER, True)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
@@ -113,27 +115,28 @@ class Component(ComponentBase):
         if self.run_finances:
             logging.info('Executing FBM finances...')
             self.handle_finances()
-
+        
         # FBA ledger reports (detail and summary) need correct date ordering
-        logging.info('Generating FBA ledger detail and summary view reports...')
-        start_dt = datetime.utcnow() - timedelta(days=self.date_range)
-        end_dt = datetime.utcnow()
+        if self.run_ledger:
+            logging.info('Generating FBA ledger detail and summary view reports...')
+            start_dt = datetime.utcnow() - timedelta(days=self.date_range)
+            end_dt = datetime.utcnow()
 
-        # Detail view report
-        detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA')
-        if detail_id:
-            df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
-            if not df_detail.empty:
-                df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
-                self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
+            # Detail view report
+            detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA')
+            if detail_id:
+                df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
+                if not df_detail.empty:
+                    df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                    self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
 
-        # Summary view report
-        summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
-        if summary_id:
-            df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'inventory_ledger_summary.csv', False, [])
-            if not df_summary.empty:
-                df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
-                self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
+            # Summary view report
+            summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
+            if summary_id:
+                df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'inventory_ledger_summary.csv', False, [])
+                if not df_summary.empty:
+                    df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                    self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
 
         # Ads reports flow
         if self.run_ads and getattr(self, 'ads_access_token', None):
