@@ -96,32 +96,37 @@
         "run_inventory": {
           "type": "boolean",
           "title": "Run FBA Inventory",
-          "default": true
+          "default": false
         },
         "run_inventory_planning": {
           "type": "boolean",
           "title": "Run FBA Inventory Planning",
-          "default": true
+          "default": false
         },
         "run_orders": {
           "type": "boolean",
           "title": "Run FBM Orders",
-          "default": true
+          "default": false
         },
         "run_returns": {
           "type": "boolean",
           "title": "Run FBM Returns",
-          "default": true
+          "default": false
         },
         "run_finances": {
           "type": "boolean",
           "title": "Run FBM Finances",
-          "default": true
+          "default": false
         },
         "run_ads": {
           "type": "boolean",
           "title": "Run Amazon Ads Reports",
-          "default": true
+          "default": false
+        },
+        "run_ledger": {
+          "type": "boolean",
+          "title": "Run FBA Ledger Reports",
+          "default": false
         }
       },
       "propertyOrder": 11
