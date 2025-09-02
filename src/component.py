@@ -128,7 +128,11 @@ class Component(ComponentBase):
                 df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
                 if not df_detail.empty:
                     df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
-                    self.process_data(df_detail, 'inventory_ledger_detail.csv', [])
+                    logging.info(f"Original ledger detail rows: {len(df_detail)}")
+                    deduplicated_df = df_detail.drop_duplicates(keep='first')
+                    logging.info(f"After deduplication, ledger detail rows: {len(deduplicated_df)}")
+                    logging.info(f"Removed {len(df_detail) - len(deduplicated_df)} duplicate rows.")
+                    self.process_data(deduplicated_df, 'inventory_ledger_detail.csv', [])
 
             # Summary view report
             summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
