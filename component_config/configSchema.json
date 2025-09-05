@@ -71,22 +71,31 @@
       },
       "propertyOrder": 9
     },
-    "inventory_fba": {
-      "type": "object",
-      "title": "FBA Inventory",
-      "description": "Settings for daily extraction of FBA inventory across specified Marketplaces.",
-      "properties": {
-        "marketplace_ids": {
-          "type": "array",
-          "title": "Marketplace IDs",
-          "description": "List of Amazon Marketplace IDs for which to pull the daily FBA inventory.",
-          "items": {
-            "type": "string"
+    "marketplaces": {
+      "type": "array",
+      "title": "Amazon Marketplaces",
+      "description": "List of Amazon marketplaces and their specific strategic products.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "marketplace_id": {
+            "type": "string",
+            "title": "Marketplace ID",
+            "description": "The ID of the Amazon Marketplace."
           },
-          "minItems": 1
-        }
-      },
-      "propertyOrder": 10
+          "strategic_products": {
+            "type": "array",
+            "title": "Strategic Products",
+            "description": "List of strategic ASINs (products) for this specific marketplace.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "marketplace_id"
+        ]
+      }
     },
     "execution": {
       "type": "object",
