@@ -26,9 +26,10 @@ KEY_APP_ID_ADS = '#app_id_ads'
 KEY_CLIENT_SECRET_ID_ADS = '#client_secret_id_ads'
 KEY_STORES = 'stores'
 
-# FBA inventory configuration keys
-KEY_INVENTORY_FBA = 'inventory_fba'
-KEY_INVENTORY_FBA_MARKETPLACE_IDS = 'marketplace_ids'  # list of FBA marketplaces for inventory
+# Amazon marketplaces configuration keys
+KEY_MARKETPLACES = 'marketplaces'
+KEY_MARKETPLACES_MARKETPLACE_IDS = 'marketplace_ids'  # list of Amazon marketplaces
+KEY_MARKETPLACES_STRATEGIC_PRODUCTS = 'strategic_products' 
 
 # Execution flags
 KEY_RUN_INVENTORY = 'run_inventory'
@@ -38,6 +39,7 @@ KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
 KEY_RUN_ADS = 'run_ads'
 KEY_RUN_LEDGER = 'run_ledger'
+KEY_RUN_STRATEGIC_PRODUCTS = 'run_startegic_products'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -82,14 +84,15 @@ class Component(ComponentBase):
         self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
         self.run_ads = exec_cfg.get(KEY_RUN_ADS, True)
         self.run_ledger = exec_cfg.get(KEY_RUN_LEDGER, True)
+        self.run_startegic_products = exec_cfg.get(KEY_RUN_STRATEGIC_PRODUCTS, True)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
         self.client_secret_id_ads = params.get(KEY_CLIENT_SECRET_ID_ADS)
         self.stores = params.get(KEY_STORES, [])
-        # FBA inventory marketplaces
-        inventory_cfg = params.get(KEY_INVENTORY_FBA, {})
-        self.marketplace_ids = inventory_cfg.get(KEY_INVENTORY_FBA_MARKETPLACE_IDS, [])
+        # Marketplaces
+        self.marketplaces_cfg = params.get(KEY_MARKETPLACES, [])
+        self.marketplace_ids = [m['marketplace_id'] for m in self.marketplaces_cfg]
 
         # Refresh tokens
         self.refresh_amazon_token()
@@ -115,6 +118,9 @@ class Component(ComponentBase):
         if self.run_finances:
             logging.info('Executing FBM finances...')
             self.handle_finances()
+        if self.run_startegic_products:
+            logging.info('Executing Amazon strategic products...')
+            self.handle_strategic_products()
         
         # FBA ledger reports (detail and summary) need correct date ordering
         if self.run_ledger:
@@ -338,6 +344,93 @@ class Component(ComponentBase):
                               'amazon_order_id', 'seller_sku', 'order_item_id'])
         else:
             logging.info("No financial data to process.")
+
+    def handle_strategic_products(self):
+        # Fetch and process catalog item data
+        all_dfs = []
+
+        # Outer loop for each marketplace entry in the config
+        for marketplace_data in self.marketplaces_cfg:
+            mp_id = marketplace_data['marketplace_id']
+            strategic_products = marketplace_data.get('strategic_products', [])
+
+            if not strategic_products:
+                continue
+
+            logging.info(f"Starting catalog fetch for {len(strategic_products)} product/s in marketplace: {mp_id}")
+
+            # Inner loop for each ASIN in that marketplace
+            for asin in strategic_products:
+                url = f"https://sellingpartnerapi-eu.amazon.com/catalog/2022-04-01/items/{asin}"
+                headers = {
+                    'x-amz-access-token': self.access_token,
+                    'Content-Type': 'application/json'
+                }
+                params = {
+                    'marketplaceIds': mp_id,
+                    'includedData': 'salesRanks'
+                }
+
+                response = self.controlled_request('get', url, headers=headers, params=params)
+
+                if not response or response.status_code != 200:
+                    logging.error(
+                        f"Catalog item fetch failed for ASIN {asin} in {mp_id}: {response.text}" if response else 'No response'
+                    )
+                    continue
+
+                # MODIFIED DATA PROCESSING BLOCK
+                data = response.json()
+                extracted_time = datetime.utcnow().isoformat() + 'Z'
+                dfs_for_asin = []
+
+                if data.get('salesRanks'):
+                    df_class = pd.json_normalize(
+                        data['salesRanks'],
+                        record_path=['classificationRanks'],
+                        meta=['marketplaceId']
+                    )
+                    if not df_class.empty:
+                        df_class['rank_type'] = 'classification'
+                        dfs_for_asin.append(df_class)
+
+                    df_display = pd.json_normalize(
+                        data['salesRanks'],
+                        record_path=['displayGroupRanks'],
+                        meta=['marketplaceId']
+                    )
+                    if not df_display.empty:
+                        df_display['rank_type'] = 'display_group'
+                        dfs_for_asin.append(df_display)
+
+                # If any ranks were found, combine them and add metadata
+                if dfs_for_asin:
+                    asin_df = pd.concat(dfs_for_asin, ignore_index=True)
+                    asin_df['asin'] = asin
+                    asin_df['extracted_at'] = extracted_time
+                    all_dfs.append(asin_df)
+                    logging.info(f"Successfully processed {len(asin_df)} ranks for ASIN {asin} in {mp_id}.")
+                else:
+                    logging.warning(f"No sales rank data found for ASIN {asin} in {mp_id}.")
+
+        # Combine and save the final results
+        cols_order = ['asin', 'marketplaceId', 'rank_type', 'title', 'rank', 'link', 'classificationId', 'websiteDisplayGroup', 'extracted_at']
+        if all_dfs:
+            result = pd.concat(all_dfs, ignore_index=True)
+            # Reorder columns for clarity
+            result = result.reindex(columns=[col for col in cols_order if col in result.columns])
+            
+            logging.info(f"Total strategic product rank records processed: {len(result)}")
+        else:
+            result = pd.DataFrame(columns=cols_order)
+            logging.warning("No strategic product rank data was fetched.")
+
+        self.process_data(
+                result,
+                'amazon_strategic_products_rank.csv',
+                primary_keys=['asin', 'marketplaceId', 'rank_type', 'title', 'extracted_at'], 
+                process_empty=True
+            )
 
     def refresh_amazon_token(self):
         # Refresh the Amazon API token
@@ -659,10 +752,10 @@ class Component(ComponentBase):
 
         return pd.DataFrame(all_rows, columns=columns)
 
-    def process_data(self, df, file_name, primary_keys):
+    def process_data(self, df, file_name, primary_keys, process_empty = False):
         # Process and save data to a file
         logging.info(f"Processing {len(df)} records to write to {file_name}.")
-        if not df.empty:
+        if not df.empty or process_empty == True:
             table_path = self.create_out_table_definition(
                 file_name, incremental=True, primary_key=primary_keys).full_path
             df.to_csv(table_path, index=False)
