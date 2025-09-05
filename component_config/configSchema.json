@@ -136,8 +136,12 @@
           "type": "boolean",
           "title": "Run FBA Ledger Reports",
           "default": false
-        }
-      },
+        },
+        "run_startegic_products":{
+                    "type": "boolean",
+          "title": "Run Amazon Strategic Products",
+          "default": false
+      }},
       "propertyOrder": 11
     }
   }
