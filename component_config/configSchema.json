@@ -2,11 +2,6 @@
   "type": "object",
   "title": "extractor configuration",
   "properties": {
-    "marketplace_id": {
-      "type": "string",
-      "title": "Amazon Marketplace ID",
-      "propertyOrder": 1
-    },
     "date_range": {
       "type": "string",
       "title": "Date Range",
