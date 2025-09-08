@@ -718,11 +718,11 @@ class Component(ComponentBase):
 
         # Collect all types of charges, fees, and promotions for shipments
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
-            for item in event['ShipmentItemList']:
-                for charge in item['ItemChargeList']:
-                    charge_types.add(self.camel_to_snake(charge['ChargeType']))
+            for item in event.get('ShipmentItemList', []):
+                for charge in item.get('ItemChargeList', []):
+                    charge_types.add(self.camel_to_snake(charge.get('ChargeType', '')))
                 for fee in item['ItemFeeList']:
-                    fee_types.add(self.camel_to_snake(fee['FeeType']))
+                    fee_types.add(self.camel_to_snake(fee.get('FeeType', '')))
                 # if 'PromotionList' in item:
                 #     for promo in item['PromotionList']:
                 #         promotion_ids.add((self.camel_to_snake(promo['PromotionType']), promo['PromotionId']))
@@ -730,10 +730,10 @@ class Component(ComponentBase):
         # Collect all types of charges, fees, and promotions for refunds
         for event in data['payload']['FinancialEvents']['RefundEventList']:
             for item in event['ShipmentItemAdjustmentList']:
-                for charge in item['ItemChargeAdjustmentList']:
-                    charge_types.add(self.camel_to_snake(charge['ChargeType']))
-                for fee in item['ItemFeeAdjustmentList']:
-                    fee_types.add(self.camel_to_snake(fee['FeeType']))
+                for charge in item.get('ItemChargeAdjustmentList', []):
+                    charge_types.add(self.camel_to_snake(charge.get('ChargeType', '')))
+                for fee in item.get('ItemFeeAdjustmentList', []):
+                    fee_types.add(self.camel_to_snake(fee.get('FeeType', '')))
 
         # Adding columns for each type of charge and fee
         for charge_type in charge_types:
@@ -755,22 +755,26 @@ class Component(ComponentBase):
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
                 row = {
-                    'amazon_order_id': event['AmazonOrderId'],
-                    'marketplace_name': event['MarketplaceName'],
-                    'posted_date': event['PostedDate'],
-                    'seller_sku': item['SellerSKU'],
-                    'order_item_id': item['OrderItemId'],
-                    'quantity_shipped': item['QuantityShipped']
+                    'amazon_order_id': event.get('AmazonOrderId', ''),
+                    'marketplace_name': event.get('MarketplaceName', ''),
+                    'posted_date': event.get('PostedDate', ''),
+                    'seller_sku': item.get('SellerSKU', ''),
+                    'order_item_id': item.get('OrderItemId', ''),
+                    'quantity_shipped': item.get('QuantityShipped', 0)
                 }
-                for charge in item['ItemChargeList']:
-                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
-                    row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
-                    row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
+                for charge in item.get('ItemChargeList', []):
+                    charge_type_snake = self.camel_to_snake(charge.get('ChargeType', ''))
+                    charge_amount_dict = charge.get('ChargeAmount', {})
+                    if charge_type_snake and charge_amount_dict:
+                        row[f"{charge_type_snake}_amount"] = charge_amount_dict.get('CurrencyAmount')
+                        row[f"{charge_type_snake}_currency"] = charge_amount_dict.get('CurrencyCode')
 
-                for fee in item['ItemFeeList']:
-                    fee_type_snake = self.camel_to_snake(fee['FeeType'])
-                    row[f"{fee_type_snake}_amount"] = fee['FeeAmount']['CurrencyAmount']
-                    row[f"{fee_type_snake}_currency"] = fee['FeeAmount']['CurrencyCode']
+                for fee in item.get('ItemFeeList', []):
+                    fee_type_snake = self.camel_to_snake(fee.get('FeeType', ''))
+                    fee_amount_dict = fee.get('FeeAmount', {})
+                    if fee_type_snake and fee_amount_dict:
+                        row[f"{fee_type_snake}_amount"] = fee_amount_dict.get('CurrencyAmount')
+                        row[f"{fee_type_snake}_currency"] = fee_amount_dict.get('CurrencyCode')
 
                 # if 'PromotionList' in item:
                 #     for promo in item['PromotionList']:
@@ -788,22 +792,26 @@ class Component(ComponentBase):
         for event in data['payload']['FinancialEvents']['RefundEventList']:
             for item in event['ShipmentItemAdjustmentList']:
                 row = {
-                    'amazon_order_id': event['AmazonOrderId'],
-                    'marketplace_name': event['MarketplaceName'],
-                    'posted_date': event['PostedDate'],
-                    'seller_sku': item['SellerSKU'],
-                    'order_item_id': item['OrderAdjustmentItemId'],
-                    'quantity_shipped': item['QuantityShipped']
+                    'amazon_order_id': event.get('AmazonOrderId', ''),
+                    'marketplace_name': event.get('MarketplaceName', ''),
+                    'posted_date': event.get('PostedDate', ''),
+                    'seller_sku': item.get('SellerSKU', ''),
+                    'order_item_id': item.get('OrderAdjustmentItemId', ''),
+                    'quantity_shipped': item.get('QuantityShipped', 0)
                 }
-                for charge in item['ItemChargeAdjustmentList']:
-                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
-                    row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
-                    row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
+                for charge in item.get('ItemChargeAdjustmentList', []):
+                    charge_type_snake = self.camel_to_snake(charge.get('ChargeType', ''))
+                    charge_amount_dict = charge.get('ChargeAmount', {})
+                    if charge_type_snake and charge_amount_dict:
+                        row[f"{charge_type_snake}_amount"] = charge_amount_dict.get('CurrencyAmount')
+                        row[f"{charge_type_snake}_currency"] = charge_amount_dict.get('CurrencyCode')
 
-                for fee in item['ItemFeeAdjustmentList']:
-                    fee_type_snake = self.camel_to_snake(fee['FeeType'])
-                    row[f"{fee_type_snake}_amount"] = fee['FeeAmount']['CurrencyAmount']
-                    row[f"{fee_type_snake}_currency"] = fee['FeeAmount']['CurrencyCode']
+                for fee in item.get('ItemFeeAdjustmentList', []):
+                    fee_type_snake = self.camel_to_snake(fee.get('FeeType', ''))
+                    fee_amount_dict = fee.get('FeeAmount', {})
+                    if fee_type_snake and fee_amount_dict:
+                        row[f"{fee_type_snake}_amount"] = fee_amount_dict.get('CurrencyAmount')
+                        row[f"{fee_type_snake}_currency"] = fee_amount_dict.get('CurrencyCode')
 
                 all_rows.append(row)  # Append each item as a row to the list
 
