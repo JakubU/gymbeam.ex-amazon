@@ -127,26 +127,46 @@ class Component(ComponentBase):
             logging.info('Generating FBA ledger detail and summary view reports...')
             start_dt = datetime.utcnow() - timedelta(days=self.date_range)
             end_dt = datetime.utcnow()
+            
+            all_details = []
+            all_summaries = []
 
-            # Detail view report
-            detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA')
-            if detail_id:
-                df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), 'inventory_ledger_detail.csv', False, [])
-                if not df_detail.empty:
-                    df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
-                    logging.info(f"Original ledger detail rows: {len(df_detail)}")
-                    deduplicated_df = df_detail.drop_duplicates(keep='first')
-                    logging.info(f"After deduplication, ledger detail rows: {len(deduplicated_df)}")
-                    logging.info(f"Removed {len(df_detail) - len(deduplicated_df)} duplicate rows.")
-                    self.process_data(deduplicated_df, 'inventory_ledger_detail.csv', [])
+            for mp in self.marketplace_ids:
+                detail_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_DETAIL_VIEW_DATA', marketplace_id=mp)
+                
+                if detail_id:
+                    df_detail = self.poll_report_status_and_download(detail_id, pd.DataFrame(), f'inventory_ledger_detail_{mp}.csv', False, [])
+                    
+                    if not df_detail.empty:
+                        df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        
+                        logging.info(f"Original ledger detail rows for {mp}: {len(df_detail)}")
+                        deduplicated_df = df_detail.drop_duplicates(keep='first')
+                        logging.info(f"After deduplication, ledger detail rows for {mp}: {len(deduplicated_df)}")
+                        
+                        all_details.append(deduplicated_df)
 
-            # Summary view report
-            summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA')
-            if summary_id:
-                df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), 'inventory_ledger_summary.csv', False, [])
-                if not df_summary.empty:
-                    df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
-                    self.process_data(df_summary, 'inventory_ledger_summary.csv', [])
+                summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA', marketplace_id=mp)
+
+                if summary_id:
+                    df_summary = self.poll_report_status_and_download(summary_id, pd.DataFrame(), f'inventory_ledger_summary_{mp}.csv', False, [])
+                    
+                    if not df_summary.empty:
+                        df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        all_summaries.append(df_summary)
+
+            # After the loop, combine and process the aggregated data
+            if all_details:
+                final_detail_df = pd.concat(all_details, ignore_index=True)
+                final_detail_df.drop_duplicates(keep='first', inplace=True) # Maybe redundant, but at least we will be safe
+                logging.info(f"Total processed ledger detail rows from all marketplaces after deduplication: {len(final_detail_df)}")
+                self.process_data(final_detail_df, 'inventory_ledger_detail.csv', [])
+            
+            if all_summaries:
+                final_summary_df = pd.concat(all_summaries, ignore_index=True)
+                final_summary_df.drop_duplicates(keep='first', inplace=True) # Maybe redundant, but at least we will be safe
+                logging.info(f"Total processed ledger summary rows from all marketplaces after deduplication: {len(final_summary_df)}")
+                self.process_data(final_summary_df, 'inventory_ledger_summary.csv', [])
 
         # Ads reports flow
         if self.run_ads and getattr(self, 'ads_access_token', None):
@@ -167,20 +187,24 @@ class Component(ComponentBase):
         order_segments = self.split_date_range(self.date_range, 28)
         # Initialize a DataFrame to hold all orders data.
         all_orders_data = pd.DataFrame()
-        for start_date, end_date in order_segments:
-            report_id = self.create_report(
-                start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL")
-            if report_id:
-                temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
-                ), 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
-                if not temp_data.empty:
-                    all_orders_data = pd.concat(
-                        [all_orders_data, temp_data], ignore_index=True)
+        for mp in self.marketplace_ids:
+            for start_date, end_date in order_segments:
+                logging.info(f"Creating report for marketplace: {mp}")
+                report_id = self.create_report(
+                    start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", mp)
+                if report_id:
+                    temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
+                    ), 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
+                    if not temp_data.empty:
+                        all_orders_data = pd.concat(
+                            [all_orders_data, temp_data], ignore_index=True)
         # Log before processing data
         logging.info(
             f"Number of records to process for orders: {len(all_orders_data)}")
         # Write to CSV after collecting data from all reports
         if not all_orders_data.empty:
+            # In case of endpoint not being marketplace-sensitive
+            all_orders_data.drop_duplicates(keep='first', inplace=True)
             self.process_data(all_orders_data, 'orders.csv', [
                               'amazon-order-id', 'sku', 'asin'])
         else:
@@ -299,19 +323,22 @@ class Component(ComponentBase):
         self.all_returns_data = pd.DataFrame()
         return_segments = self.split_date_range(self.date_range, 50)
         all_returns_data = pd.DataFrame()
-        for start_date, end_date in return_segments:
-            report_id = self.create_report(
-                start_date, end_date, "GET_XML_RETURNS_DATA_BY_RETURN_DATE")
-            if report_id:
-                temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
-                ), 'returns.csv', is_xml=True, primary_keys=['return-id', 'order-id'])
-                if not temp_data.empty:
-                    all_returns_data = pd.concat(
-                        [all_returns_data, temp_data], ignore_index=True)
+        for mp in self.marketplace_ids:
+            for start_date, end_date in return_segments:
+                report_id = self.create_report(
+                    start_date, end_date, "GET_XML_RETURNS_DATA_BY_RETURN_DATE", mp)
+                if report_id:
+                    temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
+                    ), 'returns.csv', is_xml=True, primary_keys=['return-id', 'order-id'])
+                    if not temp_data.empty:
+                        all_returns_data = pd.concat(
+                            [all_returns_data, temp_data], ignore_index=True)
         # Log before processing data
         logging.info(
             f"Number of records to process for returns: {len(all_returns_data)}")
         if not all_returns_data.empty:
+            # In case of endpoint not being marketplace-sensitive
+            all_returns_data.drop_duplicates(keep='first', inplace=True)
             self.process_data(all_returns_data, 'returns.csv', [
                               'return-id', 'order-id'])
         else:
@@ -341,7 +368,7 @@ class Component(ComponentBase):
         # Only write to CSV after all data is gathered.
         if not all_financial_data.empty:
             self.process_data(all_financial_data, 'finance.csv', [
-                              'amazon_order_id', 'seller_sku', 'order_item_id'])
+                              'amazon_order_id', 'seller_sku', 'order_item_id', "posted_date"])
         else:
             logging.info("No financial data to process.")
 
@@ -483,16 +510,15 @@ class Component(ComponentBase):
 
     def create_report(self, start_date, end_date, report_type, marketplace_id=None):
         # Request a new report from Amazon SP-API
-        used_marketplace_id = marketplace_id or self.marketplace_id
         logging.info("Creating %s report from %s to %s for marketplace %s",
-                    report_type, start_date, end_date, used_marketplace_id)
+                    report_type, start_date, end_date, marketplace_id)
         url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
         headers = {
             'Content-Type': 'application/json',
             'x-amz-access-token': self.access_token
         }
         payload = json.dumps({
-            "marketplaceIds": [used_marketplace_id],
+            "marketplaceIds": [marketplace_id],
             "reportType": report_type,
             "dataStartTime": end_date.isoformat(timespec='milliseconds') + 'Z',
             "dataEndTime": start_date.isoformat(timespec='milliseconds') + 'Z'
@@ -507,12 +533,12 @@ class Component(ComponentBase):
             logging.error("Failed to create report: %s", response.text)
             return None
 
-    def create_ledger_report(self, start_date, end_date, report_type):
+    def create_ledger_report(self, start_date, end_date, report_type, marketplace_id):
             logging.info(f"Creating {report_type} ledger report from {start_date} to {end_date}")
             url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
             headers = {'Content-Type':'application/json','x-amz-access-token':self.access_token}
             payload = {
-                'marketplaceIds':[self.marketplace_id],
+                'marketplaceIds':[marketplace_id],
                 'reportType':report_type,
                 'dataStartTime':start_date.isoformat(timespec='milliseconds')+'Z',
                 'dataEndTime':end_date.isoformat(timespec='milliseconds')+'Z'
@@ -690,7 +716,7 @@ class Component(ComponentBase):
         fee_types = set()
         promotion_ids = set()
 
-        # Collect all types of charges, fees, and promotions
+        # Collect all types of charges, fees, and promotions for shipments
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
                 for charge in item['ItemChargeList']:
@@ -700,6 +726,14 @@ class Component(ComponentBase):
                 # if 'PromotionList' in item:
                 #     for promo in item['PromotionList']:
                 #         promotion_ids.add((self.camel_to_snake(promo['PromotionType']), promo['PromotionId']))
+
+        # Collect all types of charges, fees, and promotions for refunds
+        for event in data['payload']['FinancialEvents']['RefundEventList']:
+            for item in event['ShipmentItemAdjustmentList']:
+                for charge in item['ItemChargeAdjustmentList']:
+                    charge_types.add(self.camel_to_snake(charge['ChargeType']))
+                for fee in item['ItemFeeAdjustmentList']:
+                    fee_types.add(self.camel_to_snake(fee['FeeType']))
 
         # Adding columns for each type of charge and fee
         for charge_type in charge_types:
@@ -717,7 +751,7 @@ class Component(ComponentBase):
         financial_data_df = pd.DataFrame(columns=columns)
         all_rows = []
 
-        # Populate DataFrame with data
+        # Populate DataFrame with shipment data
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
                 row = {
@@ -747,6 +781,29 @@ class Component(ComponentBase):
                 #         row[promo_type_id] = promo['PromotionId']
                 #         row[promo_type_amount] = promo['PromotionAmount']['CurrencyAmount']
                 #         row[promo_type_currency] = promo['PromotionAmount']['CurrencyCode']
+
+                all_rows.append(row)  # Append each item as a row to the list
+
+        # Populate DataFrame with refund data
+        for event in data['payload']['FinancialEvents']['RefundEventList']:
+            for item in event['ShipmentItemAdjustmentList']:
+                row = {
+                    'amazon_order_id': event['AmazonOrderId'],
+                    'marketplace_name': event['MarketplaceName'],
+                    'posted_date': event['PostedDate'],
+                    'seller_sku': item['SellerSKU'],
+                    'order_item_id': item['OrderAdjustmentItemId'],
+                    'quantity_shipped': item['QuantityShipped']
+                }
+                for charge in item['ItemChargeAdjustmentList']:
+                    charge_type_snake = self.camel_to_snake(charge['ChargeType'])
+                    row[f"{charge_type_snake}_amount"] = charge['ChargeAmount']['CurrencyAmount']
+                    row[f"{charge_type_snake}_currency"] = charge['ChargeAmount']['CurrencyCode']
+
+                for fee in item['ItemFeeAdjustmentList']:
+                    fee_type_snake = self.camel_to_snake(fee['FeeType'])
+                    row[f"{fee_type_snake}_amount"] = fee['FeeAmount']['CurrencyAmount']
+                    row[f"{fee_type_snake}_currency"] = fee['FeeAmount']['CurrencyCode']
 
                 all_rows.append(row)  # Append each item as a row to the list
 
