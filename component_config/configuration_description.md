@@ -23,7 +23,7 @@ This component is designed to connect to Amazon's Selling Partner API and Amazon
   - `inventory_ledger_summary.csv` - FBA ledger summary view
   - `orders.csv` - FBM orders
   - `returns.csv` - FBM returns
-  - `finance.csv` - FBM financial events
+  - `finance.csv` - FBM financial events (comprehensive transaction data with all charge/fee types)
   - `advertising.csv` - Amazon Ads campaign reports
   - `amazon_strategic_products_rank.csv` - Strategic products sales rankings
 
@@ -167,6 +167,50 @@ product_id,products_asin,product_name
 - `classificationId` - Classification ID
 - `websiteDisplayGroup` - Display group
 - `extracted_at` - Extraction timestamp
+
+### FBM Financial Events Configuration
+
+This section configures extraction of FBM financial events using the `/finances/v0/financialEvents` endpoint.
+
+**Output Table**: `finance.csv` contains comprehensive financial transaction data with consistent schema:
+
+#### Base Columns
+- `amazon_order_id` - Amazon order identifier
+- `marketplace_name` - Marketplace name  
+- `posted_date` - Transaction posting date
+- `seller_sku` - Seller SKU
+- `order_item_id` - Order item identifier
+- `quantity_shipped` - Quantity shipped
+
+#### Financial Amount Columns
+For each charge/fee type, two columns are generated:
+- `{type}_amount` - Financial amount
+- `{type}_currency` - Currency code
+
+#### Supported Charge/Fee Types
+- `gift_wrap` - Gift wrap charges
+- `shipping_charge` - Shipping charges
+- `shipping_tax` - Shipping tax
+- `principal` - Principal amount
+- `tax` - Tax amount
+- `gift_wrap_tax` - Gift wrap tax
+- `giftwrap_commission` - Gift wrap commission
+- `renewed_program_fee` - Renewed program fees
+- `shipping_hb` - Shipping HB charges
+- `variable_closing_fee` - Variable closing fees
+- `fixed_closing_fee` - Fixed closing fees
+- `commission` - Commission fees
+- `refund_commission` - Refund commission
+- `return_shipping` - Return shipping charges
+- `goodwill` - Goodwill adjustments
+- `digital_services_fee` - Digital services fees
+- `giftwrap_chargeback` - Gift wrap chargebacks
+- `shipping_chargeback` - Shipping chargebacks
+- `fba_per_unit_fulfillment_fee` - FBA per unit fulfillment fees
+- `generic_deduction` - Generic deductions
+- `digital_services_fee_fba` - FBA digital services fees
+
+**Schema Consistency**: All possible charge/fee types are included in the schema even if not present in the current data period, ensuring consistent column structure for Keboola mapping and preventing missing column errors.
 
 # GET_LEDGER_SUMMARY_VIEW_DATA
 
