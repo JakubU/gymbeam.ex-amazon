@@ -124,7 +124,7 @@ Set parameters in `config.json` or the KBC UI:
 | `inventory_ledger_summary.csv`     | FBA ledger summary view              |
 | `orders.csv`                       | FBM orders                           |
 | `returns.csv`                      | FBM returns                          |
-| `finance.csv`                      | FBM financial events                 |
+| `finance.csv`                      | FBM financial events (see details below) |
 | `advertising.csv`                  | Amazon Ads campaign reports          |
 | `amazon_strategic_products_rank.csv` | Strategic products sales rankings |
 
@@ -138,6 +138,48 @@ cd gymbeam.ex-amazon
 docker-compose build
 docker-compose run --rm dev
 ```
+
+## Finance.csv Column Details
+
+The `finance.csv` output contains comprehensive financial transaction data with the following structure:
+
+### Base Columns
+- `amazon_order_id` - Amazon order identifier
+- `marketplace_name` - Marketplace name
+- `posted_date` - Transaction posting date
+- `seller_sku` - Seller SKU
+- `order_item_id` - Order item identifier
+- `quantity_shipped` - Quantity shipped
+
+### Financial Amount Columns
+For each charge/fee type, two columns are generated:
+- `{type}_amount` - Financial amount
+- `{type}_currency` - Currency code
+
+### Supported Charge/Fee Types
+- `gift_wrap` - Gift wrap charges
+- `shipping_charge` - Shipping charges
+- `shipping_tax` - Shipping tax
+- `principal` - Principal amount
+- `tax` - Tax amount
+- `gift_wrap_tax` - Gift wrap tax
+- `giftwrap_commission` - Gift wrap commission
+- `renewed_program_fee` - Renewed program fees
+- `shipping_hb` - Shipping HB charges
+- `variable_closing_fee` - Variable closing fees
+- `fixed_closing_fee` - Fixed closing fees
+- `commission` - Commission fees
+- `refund_commission` - Refund commission
+- `return_shipping` - Return shipping charges
+- `goodwill` - Goodwill adjustments
+- `digital_services_fee` - Digital services fees
+- `giftwrap_chargeback` - Gift wrap chargebacks
+- `shipping_chargeback` - Shipping chargebacks
+- `fba_per_unit_fulfillment_fee` - FBA per unit fulfillment fees
+- `generic_deduction` - Generic deductions
+- `digital_services_fee_fba` - FBA digital services fees
+
+**Note:** All possible charge/fee types are included in the schema even if not present in the current data period, ensuring consistent column structure for Keboola mapping.
 
 ## Integration
 

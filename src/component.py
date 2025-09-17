@@ -754,13 +754,25 @@ class Component(ComponentBase):
                 for fee in item.get('ItemFeeAdjustmentList', []):
                     fee_types.add(self.camel_to_snake(fee.get('FeeType', '')))
 
+        # Define all possible charge and fee types that Amazon API can return
+        # This ensures consistent schema even when some types are missing from current data
+        # Based on the complete list from Keboola error message
+        all_possible_charge_types = {
+            'gift_wrap', 'shipping_charge', 'shipping_tax', 'principal', 'tax',
+            'gift_wrap_tax', 'giftwrap_commission', 'renewed_program_fee',
+            'shipping_hb', 'variable_closing_fee', 'fixed_closing_fee',
+            'commission', 'refund_commission', 'return_shipping', 'goodwill',
+            'digital_services_fee', 'giftwrap_chargeback', 'shipping_chargeback',
+            'fba_per_unit_fulfillment_fee', 'generic_deduction', 'digital_services_fee_fba'
+        }
+        
+        # Add all possible charge and fee types to ensure consistent schema
+        all_charge_fee_types = charge_types.union(fee_types).union(all_possible_charge_types)
+        
         # Adding columns for each type of charge and fee
-        for charge_type in charge_types:
+        for charge_type in all_charge_fee_types:
             columns.append(f"{charge_type}_amount")
             columns.append(f"{charge_type}_currency")
-        for fee_type in fee_types:
-            columns.append(f"{fee_type}_amount")
-            columns.append(f"{fee_type}_currency")
         for promo_type, promo_id in promotion_ids:
             columns.append(f"{promo_type}_amount")
             columns.append(f"{promo_type}_currency")
@@ -773,14 +785,16 @@ class Component(ComponentBase):
         # Populate DataFrame with shipment data
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
-                row = {
+                # Initialize row with all possible columns set to empty values
+                row = {col: '' for col in columns}
+                row.update({
                     'amazon_order_id': event.get('AmazonOrderId', ''),
                     'marketplace_name': event.get('MarketplaceName', ''),
                     'posted_date': event.get('PostedDate', ''),
                     'seller_sku': item.get('SellerSKU', ''),
                     'order_item_id': item.get('OrderItemId', ''),
                     'quantity_shipped': item.get('QuantityShipped', 0)
-                }
+                })
                 for charge in item.get('ItemChargeList', []):
                     charge_type_snake = self.camel_to_snake(charge.get('ChargeType', ''))
                     charge_amount_dict = charge.get('ChargeAmount', {})
@@ -810,14 +824,16 @@ class Component(ComponentBase):
         # Populate DataFrame with refund data
         for event in data['payload']['FinancialEvents']['RefundEventList']:
             for item in event['ShipmentItemAdjustmentList']:
-                row = {
+                # Initialize row with all possible columns set to empty values
+                row = {col: '' for col in columns}
+                row.update({
                     'amazon_order_id': event.get('AmazonOrderId', ''),
                     'marketplace_name': event.get('MarketplaceName', ''),
                     'posted_date': event.get('PostedDate', ''),
                     'seller_sku': item.get('SellerSKU', ''),
                     'order_item_id': item.get('OrderAdjustmentItemId', ''),
                     'quantity_shipped': item.get('QuantityShipped', 0)
-                }
+                })
                 for charge in item.get('ItemChargeAdjustmentList', []):
                     charge_type_snake = self.camel_to_snake(charge.get('ChargeType', ''))
                     charge_amount_dict = charge.get('ChargeAmount', {})
