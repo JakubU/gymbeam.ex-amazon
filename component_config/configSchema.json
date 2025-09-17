@@ -69,7 +69,7 @@
     "marketplaces": {
       "type": "array",
       "title": "Amazon Marketplaces",
-      "description": "List of Amazon marketplaces and their specific strategic products.",
+      "description": "List of Amazon marketplaces for data extraction.",
       "items": {
         "type": "object",
         "properties": {
@@ -77,14 +77,6 @@
             "type": "string",
             "title": "Marketplace ID",
             "description": "The ID of the Amazon Marketplace."
-          },
-          "strategic_products": {
-            "type": "array",
-            "title": "Strategic Products",
-            "description": "List of strategic ASINs (products) for this specific marketplace.",
-            "items": {
-              "type": "string"
-            }
           }
         },
         "required": [

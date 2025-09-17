@@ -83,8 +83,7 @@ Set parameters in `config.json` or the KBC UI:
   
   "marketplaces": [
     {
-      "marketplace_id": "APJ6JRA9NG5V4",
-      "strategic_products": ["B08N5WRWNW", "B07H8QMZWV"]
+      "marketplace_id": "APJ6JRA9NG5V4"
     },
     {
       "marketplace_id": "A1PA6795UKMFR9"
