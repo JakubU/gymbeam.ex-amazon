@@ -15,7 +15,7 @@ import random
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# Configuration variables for API access and other settings
+# Configuration variables for API access and other settingss
 KEY_REFRESH_TOKEN = '#refresh_token'
 KEY_APP_ID = '#app_id'
 KEY_CLIENT_SECRET_ID = '#client_secret_id'
