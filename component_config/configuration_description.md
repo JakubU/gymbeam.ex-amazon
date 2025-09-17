@@ -36,7 +36,7 @@ This component is designed to connect to Amazon's Selling Partner API and Amazon
 #### Data Extraction
 - **date_range**: Number of days to look back for data extraction (default: 7)
 - **stores**: Array of Amazon stores with their Advertising API scopes for ads reporting
-- **marketplaces**: Array of Amazon marketplaces with optional strategic products configuration
+- **marketplaces**: Array of Amazon marketplaces for data extraction
 
 #### Execution Control
 - **execution**: Object containing boolean flags to control which extraction steps to run:
@@ -89,7 +89,7 @@ The component is fully integrated into the KBC platform, allowing users to confi
 
 This section configures daily extraction of FBA inventory snapshots across one or more Amazon Marketplaces using the SP‑API `getInventorySummaries` endpoint (details: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries).
 
-- **marketplaces** _(array[object], required)_: List of Amazon Marketplace objects containing marketplace_id and optional strategic_products
+- **marketplaces** _(array[object], required)_: List of Amazon Marketplace objects containing marketplace_id
 - **details**: Always set to `true` to retrieve detailed inventory fields
 - **pagination**: Uses `nextToken` in response to fetch subsequent pages until exhausted
 
@@ -269,8 +269,7 @@ Report Attributes:
     ],
     "marketplaces": [
       {
-        "marketplace_id": "APJ6JRA9NG5V4",
-        "strategic_products": ["B08N5WRWNW", "B07H8QMZWV"]
+        "marketplace_id": "APJ6JRA9NG5V4"
       },
       {
         "marketplace_id": "A1PA6795UKMFR9"
