@@ -372,29 +372,47 @@ class Component(ComponentBase):
         else:
             logging.info("No financial data to process.")
 
+    def listings_extract(self, table_path: str) -> dict:
+        """
+        Extracting ASIN for each listing from source table
+        """
+        data = pd.read_csv(table_path)
+        df_filtered = data.dropna(subset=['products_asin'])
+        distinct_asin_list = list(df_filtered['products_asin'].unique())
+
+        if len(distinct_asin_list) > 1:
+            logging.info("Country words were retrieved.")
+            return distinct_asin_list
+        else:
+            raise Exception("Unable to retrieve country words")
+
     def handle_strategic_products(self):
         # Fetch and process catalog item data
         all_dfs = []
 
-        # Outer loop for each marketplace entry in the config
+        # Fetch input table with ASIN for Amazon products
+        input_tables = self.get_input_tables_definitions()
+
+        strategic_products = self.listings_extract(table_path=input_tables[0].full_path)
+
+        # Outer loop for each marketplace
         for marketplace_data in self.marketplaces_cfg:
             mp_id = marketplace_data['marketplace_id']
-            strategic_products = marketplace_data.get('strategic_products', [])
 
             if not strategic_products:
                 continue
 
-            logging.info(f"Starting catalog fetch for {len(strategic_products)} product/s in marketplace: {mp_id}")
-
-            # Inner loop for each ASIN in that marketplace
-            for asin in strategic_products:
-                url = f"https://sellingpartnerapi-eu.amazon.com/catalog/2022-04-01/items/{asin}"
+            for i in range(0, len(strategic_products), 20):
+                asin_batch = strategic_products[i:i + 20]
+                
+                url = "https://sellingpartnerapi-eu.amazon.com/catalog/2022-04-01/items"
                 headers = {
                     'x-amz-access-token': self.access_token,
                     'Content-Type': 'application/json'
                 }
                 params = {
                     'marketplaceIds': mp_id,
+                    'keywords': ','.join(asin_batch),
                     'includedData': 'salesRanks'
                 }
 
@@ -402,43 +420,44 @@ class Component(ComponentBase):
 
                 if not response or response.status_code != 200:
                     logging.error(
-                        f"Catalog item fetch failed for ASIN {asin} in {mp_id}: {response.text}" if response else 'No response'
+                        f"Catalog item fetch failed for batch starting with {asin_batch[0]} in {mp_id}: {response.text}" if response else 'No response'
                     )
                     continue
-
-                # MODIFIED DATA PROCESSING BLOCK
+            
                 data = response.json()
                 extracted_time = datetime.utcnow().isoformat() + 'Z'
-                dfs_for_asin = []
+                
+                for item in data.get('items', []):
+                    asin = item.get('asin')
+                    dfs_for_asin = []
 
-                if data.get('salesRanks'):
-                    df_class = pd.json_normalize(
-                        data['salesRanks'],
-                        record_path=['classificationRanks'],
-                        meta=['marketplaceId']
-                    )
-                    if not df_class.empty:
-                        df_class['rank_type'] = 'classification'
-                        dfs_for_asin.append(df_class)
+                    if item.get('salesRanks'):
+                        df_class = pd.json_normalize(
+                            item['salesRanks'],
+                            record_path=['classificationRanks'],
+                            meta=['marketplaceId']
+                        )
+                        if not df_class.empty:
+                            df_class['rank_type'] = 'classification'
+                            dfs_for_asin.append(df_class)
 
-                    df_display = pd.json_normalize(
-                        data['salesRanks'],
-                        record_path=['displayGroupRanks'],
-                        meta=['marketplaceId']
-                    )
-                    if not df_display.empty:
-                        df_display['rank_type'] = 'display_group'
-                        dfs_for_asin.append(df_display)
+                        df_display = pd.json_normalize(
+                            item['salesRanks'],
+                            record_path=['displayGroupRanks'],
+                            meta=['marketplaceId']
+                        )
+                        if not df_display.empty:
+                            df_display['rank_type'] = 'display_group'
+                            dfs_for_asin.append(df_display)
 
-                # If any ranks were found, combine them and add metadata
-                if dfs_for_asin:
-                    asin_df = pd.concat(dfs_for_asin, ignore_index=True)
-                    asin_df['asin'] = asin
-                    asin_df['extracted_at'] = extracted_time
-                    all_dfs.append(asin_df)
-                    logging.info(f"Successfully processed {len(asin_df)} ranks for ASIN {asin} in {mp_id}.")
-                else:
-                    logging.warning(f"No sales rank data found for ASIN {asin} in {mp_id}.")
+                    if dfs_for_asin:
+                        asin_df = pd.concat(dfs_for_asin, ignore_index=True)
+                        asin_df['asin'] = asin
+                        asin_df['extracted_at'] = extracted_time
+                        all_dfs.append(asin_df)
+                        logging.info(f"Successfully processed ranks for ASIN {asin} in {mp_id}.")
+                    else:
+                        logging.warning(f"No sales rank data found for ASIN {asin} in {mp_id}.")
 
         # Combine and save the final results
         cols_order = ['asin', 'marketplaceId', 'rank_type', 'title', 'rank', 'link', 'classificationId', 'websiteDisplayGroup', 'extracted_at']
