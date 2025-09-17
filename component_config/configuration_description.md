@@ -2,24 +2,52 @@
 
 ## Description
 
-This component is designed to connect to Amazon's Selling Partner API and extract orders, returns, and financial data. It's optimized for use within the Keboola Connection (KBC) ecosystem.
+This component is designed to connect to Amazon's Selling Partner API and Amazon Ads API to extract comprehensive e-commerce data including FBA inventory, FBM orders, returns, financial events, and advertising reports. It's optimized for use within the Keboola Connection (KBC) ecosystem and supports multiple Amazon marketplaces.
 
 ## Configuration Sections
 
 ### Storage
 
 #### Input
-- **Tables**: Configurations for input tables from which data can be fetched, specifying source, destination, and optional filters.
+- **Tables**: Input table containing ASINs for strategic products analysis (required for strategic products extraction)
+  - **Required Column**: `products_asin` - Contains Amazon Standard Identification Numbers (ASINs) to analyze
+  - **Usage**: The component reads this table to extract unique ASINs and fetch their sales rankings across configured marketplaces
+  - **Format**: CSV file with at least one column named `products_asin`
+  - **Example**: Table with columns like `product_id`, `products_asin`, `product_name` where `products_asin` contains values like "B08N5WRWNW", "B07H8QMZWV"
 
 #### Output
-- **Tables**: Specifies the tables where the output data will be stored after processing. In the current setup, there are no predefined output tables.
+- **Tables**: Multiple output tables containing extracted data:
+  - `inventory.csv` - FBA inventory snapshots
+  - `inventory_planning.csv` - FBA inventory planning data
+  - `inventory_ledger_detail.csv` - FBA ledger detail view
+  - `inventory_ledger_summary.csv` - FBA ledger summary view
+  - `orders.csv` - FBM orders
+  - `returns.csv` - FBM returns
+  - `finance.csv` - FBM financial events
+  - `advertising.csv` - Amazon Ads campaign reports
+  - `amazon_strategic_products_rank.csv` - Strategic products sales rankings
 
 ### Parameters
 
-- **marketplace_id**: Specifies the Amazon marketplace from which data is to be extracted. It is crucial for directing API calls to the correct regional endpoint.
-- **#refresh_token**, **#app_id**, **#client_secret_id**: These are secured parameters used for OAuth authentication with Amazon's API. They must be stored securely and are essential for accessing Amazon's resources.
-- **#refresh_token_ads**, **#app_id_ads**, **#client_secret_id_ads**: These are secured parameters used for OAuth authentication with Amazon Ads API.
-- **date_range**: Determines the time frame for the data extraction. The component calculates the start date by subtracting the given number of days from the current date.
+#### Authentication
+- **#refresh_token**, **#app_id**, **#client_secret_id**: OAuth credentials for Amazon Seller Central API access
+- **#refresh_token_ads**, **#app_id_ads**, **#client_secret_id_ads**: OAuth credentials for Amazon Ads API access
+
+#### Data Extraction
+- **date_range**: Number of days to look back for data extraction (default: 7)
+- **stores**: Array of Amazon stores with their Advertising API scopes for ads reporting
+- **marketplaces**: Array of Amazon marketplaces with optional strategic products configuration
+
+#### Execution Control
+- **execution**: Object containing boolean flags to control which extraction steps to run:
+  - `run_inventory` - FBA inventory snapshots
+  - `run_inventory_planning` - FBA inventory planning data
+  - `run_orders` - FBM orders
+  - `run_returns` - FBM returns
+  - `run_finances` - FBM financial events
+  - `run_ads` - Amazon Ads reports
+  - `run_ledger` - FBA ledger reports (detail and summary)
+  - `run_startegic_products` - Strategic products sales rankings
 
 ### Obtaining API Credentials and Marketplace ID
 
@@ -61,9 +89,9 @@ The component is fully integrated into the KBC platform, allowing users to confi
 
 This section configures daily extraction of FBA inventory snapshots across one or more Amazon Marketplaces using the SP‑API `getInventorySummaries` endpoint (details: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries).
 
-- **inventory_fba.marketplace_ids** _(array[string], required)_: List of Amazon Marketplace IDs for which to pull inventory data.
-- **details**: Always set to `true` to retrieve detailed inventory fields.
-- **pagination**: Uses `nextToken` in response to fetch subsequent pages until exhausted.
+- **marketplaces** _(array[object], required)_: List of Amazon Marketplace objects containing marketplace_id and optional strategic_products
+- **details**: Always set to `true` to retrieve detailed inventory fields
+- **pagination**: Uses `nextToken` in response to fetch subsequent pages until exhausted
 
 **Output Table**: `inventory.csv` includes the following key columns:
 
@@ -97,7 +125,48 @@ This section configures daily extraction of FBA inventory snapshots across one o
 | `defective_quantity`         | `inventoryDetails.unfulfillableQuantity.defectiveQuantity`    | Unsellable due to defects                                       |
 | `expired_quantity`           | `inventoryDetails.unfulfillableQuantity.expiredQuantity`      | Unsellable due to expiration                                     |
 
-This approach ensures column names are ≤ 64 characters and remain descriptive.For full API schema, see: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries
+This approach ensures column names are ≤ 64 characters and remain descriptive. For full API schema, see: https://developer-docs.amazon.com/sp-api/reference/getinventorysummaries
+
+### FBA Inventory Planning Configuration
+
+This section configures extraction of FBA Inventory Planning data using the `GET_FBA_INVENTORY_PLANNING_DATA` report type.
+
+**Output Table**: `inventory_planning.csv` contains planning data with columns including:
+- `snapshot-date` - Date of the planning snapshot
+- `sku` - Seller SKU
+- `asin` - Amazon Standard Identification Number
+- `marketplace_id` - Marketplace ID
+- `extracted_at` - Extraction timestamp
+
+### Strategic Products Configuration
+
+This section configures extraction of sales rankings for strategic products using the Catalog Items API.
+
+**Requirements**:
+- **Input Table**: Required table with `products_asin` column containing ASINs to analyze
+  - Must contain at least one column named `products_asin`
+  - ASINs should be valid Amazon Standard Identification Numbers
+  - Component processes up to 20 ASINs per API call for optimal performance
+- **Marketplace Configuration**: `marketplaces` array with marketplace IDs where rankings should be fetched
+
+**Input Table Format**:
+```csv
+product_id,products_asin,product_name
+1,B08N5WRWNW,Product A
+2,B07H8QMZWV,Product B
+3,B09XYZ1234,Product C
+```
+
+**Output Table**: `amazon_strategic_products_rank.csv` contains:
+- `asin` - Amazon Standard Identification Number
+- `marketplaceId` - Marketplace ID
+- `rank_type` - Type of ranking (classification or display_group)
+- `title` - Product title
+- `rank` - Sales rank
+- `link` - Product link
+- `classificationId` - Classification ID
+- `websiteDisplayGroup` - Display group
+- `extracted_at` - Extraction timestamp
 
 # GET_LEDGER_SUMMARY_VIEW_DATA
 
@@ -181,13 +250,41 @@ Report Attributes:
 ```json
 {
   "parameters": {
-    "marketplace_id": "APJ6JRA9NG5V4",
     "#refresh_token": "EncryptedToken",
-    "#app_id": "EncryptedAppID",
+    "#app_id": "EncryptedAppID", 
     "#client_secret_id": "EncryptedClientSecret",
     "#refresh_token_ads": "EncryptedTokenAds",
     "#app_id_ads": "EncryptedAppIDAds",
     "#client_secret_id_ads": "EncryptedClientSecretAds",
-    "date_range": "30"
+    "date_range": "30",
+    "stores": [
+      {
+        "name": "Amazon.it",
+        "scope": "1234567890"
+      },
+      {
+        "name": "Amazon.de", 
+        "scope": "0987654321"
+      }
+    ],
+    "marketplaces": [
+      {
+        "marketplace_id": "APJ6JRA9NG5V4",
+        "strategic_products": ["B08N5WRWNW", "B07H8QMZWV"]
+      },
+      {
+        "marketplace_id": "A1PA6795UKMFR9"
+      }
+    ],
+    "execution": {
+      "run_inventory": true,
+      "run_inventory_planning": true,
+      "run_orders": true,
+      "run_returns": true,
+      "run_finances": true,
+      "run_ads": true,
+      "run_ledger": true,
+      "run_startegic_products": true
+    }
   }
 }
