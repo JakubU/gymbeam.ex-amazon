@@ -405,59 +405,69 @@ class Component(ComponentBase):
             for i in range(0, len(strategic_products), 20):
                 asin_batch = strategic_products[i:i + 20]
                 
-                url = "https://sellingpartnerapi-eu.amazon.com/catalog/2022-04-01/items"
-                headers = {
-                    'x-amz-access-token': self.access_token,
-                    'Content-Type': 'application/json'
-                }
-                params = {
-                    'marketplaceIds': mp_id,
-                    'keywords': ','.join(asin_batch),
-                    'includedData': 'salesRanks'
-                }
+                next_token = None
+                while True:
+                    url = "https://sellingpartnerapi-eu.amazon.com/catalog/2022-04-01/items"
+                    headers = {
+                        'x-amz-access-token': self.access_token,
+                        'Content-Type': 'application/json'
+                    }
+                    params = {
+                        'marketplaceIds': mp_id,
+                        'keywords': ','.join(asin_batch),
+                        'includedData': 'salesRanks'
+                    }
+                    if next_token:
+                        params['pageToken'] = next_token
 
-                response = self.controlled_request('get', url, headers=headers, params=params)
+                    response = self.controlled_request('get', url, headers=headers, params=params)
 
-                if not response or response.status_code != 200:
-                    logging.error(
-                        f"Catalog item fetch failed for batch starting with {asin_batch[0]} in {mp_id}: {response.text}" if response else 'No response'
-                    )
-                    continue
-            
-                data = response.json()
-                extracted_time = datetime.utcnow().isoformat() + 'Z'
+                    if not response or response.status_code != 200:
+                        logging.error(
+                            f"Catalog item fetch failed for batch starting with {asin_batch[0]} in {mp_id}: {response.text}" if response else 'No response'
+                        )
+                        continue
                 
-                for item in data.get('items', []):
-                    asin = item.get('asin')
-                    dfs_for_asin = []
+                    data = response.json()
+                    extracted_time = datetime.utcnow().isoformat() + 'Z'
+                    
+                    for item in data.get('items', []):
+                        asin = item.get('asin')
+                        dfs_for_asin = []
 
-                    if item.get('salesRanks'):
-                        df_class = pd.json_normalize(
-                            item['salesRanks'],
-                            record_path=['classificationRanks'],
-                            meta=['marketplaceId']
-                        )
-                        if not df_class.empty:
-                            df_class['rank_type'] = 'classification'
-                            dfs_for_asin.append(df_class)
+                        if item.get('salesRanks'):
+                            df_class = pd.json_normalize(
+                                item['salesRanks'],
+                                record_path=['classificationRanks'],
+                                meta=['marketplaceId']
+                            )
+                            if not df_class.empty:
+                                df_class['rank_type'] = 'classification'
+                                dfs_for_asin.append(df_class)
 
-                        df_display = pd.json_normalize(
-                            item['salesRanks'],
-                            record_path=['displayGroupRanks'],
-                            meta=['marketplaceId']
-                        )
-                        if not df_display.empty:
-                            df_display['rank_type'] = 'display_group'
-                            dfs_for_asin.append(df_display)
+                            df_display = pd.json_normalize(
+                                item['salesRanks'],
+                                record_path=['displayGroupRanks'],
+                                meta=['marketplaceId']
+                            )
+                            if not df_display.empty:
+                                df_display['rank_type'] = 'display_group'
+                                dfs_for_asin.append(df_display)
 
-                    if dfs_for_asin:
-                        asin_df = pd.concat(dfs_for_asin, ignore_index=True)
-                        asin_df['asin'] = asin
-                        asin_df['extracted_at'] = extracted_time
-                        all_dfs.append(asin_df)
-                        logging.info(f"Successfully processed ranks for ASIN {asin} in {mp_id}.")
-                    else:
-                        logging.warning(f"No sales rank data found for ASIN {asin} in {mp_id}.")
+                        if dfs_for_asin:
+                            asin_df = pd.concat(dfs_for_asin, ignore_index=True)
+                            asin_df['asin'] = asin
+                            asin_df['extracted_at'] = extracted_time
+                            all_dfs.append(asin_df)
+                            logging.info(f"Successfully processed ranks for ASIN {asin} in {mp_id}.")
+                        else:
+                            logging.warning(f"No sales rank data found for ASIN {asin} in {mp_id}.")
+
+                    pagination_data = data.get('pagination', {})
+                    next_token = pagination_data.get('nextToken')
+
+                    if not next_token:
+                        break
 
         # Combine and save the final results
         cols_order = ['asin', 'marketplaceId', 'rank_type', 'title', 'rank', 'link', 'classificationId', 'websiteDisplayGroup', 'extracted_at']
