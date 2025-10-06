@@ -191,10 +191,10 @@ class Component(ComponentBase):
             for start_date, end_date in order_segments:
                 logging.info(f"Creating report for marketplace: {mp}")
                 report_id = self.create_report(
-                    start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", mp)
+                    start_date, end_date, "GET_XML_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", mp)
                 if report_id:
                     temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
-                    ), 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
+                    ), 'orders.csv', is_xml=True, primary_keys=['amazon-order-id', 'sku', 'asin'])
                     if not temp_data.empty:
                         all_orders_data = pd.concat(
                             [all_orders_data, temp_data], ignore_index=True)
@@ -623,20 +623,23 @@ class Component(ComponentBase):
         response = self.controlled_request('get', url, headers=headers)
         if response and response.status_code == 200:
             document_url = response.json().get('url')
-            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml)
+            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml, file_name)
         else:
             logging.error(f"Failed to download document: {response.text}")
             # Ensure this returns an empty DataFrame on failure.
             return pd.DataFrame()
 
-    def process_document(self, document_url, compression_algorithm, is_xml):
+    def process_document(self, document_url, compression_algorithm, is_xml, file_name):
         # Process the document after downloading, convert from XML/CSV as needed
         response = self.controlled_request('get', document_url)
         if response and response.status_code == 200:
             content = gzip.decompress(
                 response.content) if compression_algorithm == 'GZIP' else response.content
             if is_xml:
-                data_frame = self.parse_xml_data(content)
+                if file_name == 'orders.csv':
+                    data_frame = self.parse_all_orders_xml_report(content)
+                else:
+                    data_frame = self.parse_xml_data(content)
             else:
                 data_frame = pd.read_csv(io.StringIO(
                     content.decode('utf-8')), delimiter='\t')
@@ -684,6 +687,111 @@ class Component(ComponentBase):
             all_records.append(record)
         logging.info("Completed parsing XML data.")
         return pd.DataFrame(all_records)
+
+    def parse_all_orders_xml_report(self, xml_data):
+        # Parses the XML data from a 'GET_XML_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL' report.
+        logging.info("Starting XML parsing for the All Orders report.")
+
+        def get_text_from_node(node, path, default=''):
+            """Safely get text from a node, returning a default value if not found."""
+            if node is None:
+                return default
+            found_node = node.find(path)
+            return found_node.text.strip() if found_node is not None and found_node.text else default
+
+        def get_price_component(item_price_node, component_type, default=0.0):
+            """Extract a specific price component from an ItemPrice node."""
+            if item_price_node is None:
+                return default
+            for component in item_price_node.findall('Component'):
+                if get_text_from_node(component, 'Type') == component_type:
+                    amount_node = component.find('Amount')
+                    return float(amount_node.text) if amount_node is not None and amount_node.text else default
+            return default
+
+        try:
+            root = ET.fromstring(xml_data)
+            all_order_items = []
+
+            for message in root.findall('Message'):
+                order = message.find('Order')
+                if order is None:
+                    continue
+
+                fulfillment_data = order.find('FulfillmentData')
+                address = fulfillment_data.find('Address') if fulfillment_data is not None else None
+                
+                order_details = {
+                    'amazon_order_id': get_text_from_node(order, 'AmazonOrderID'),
+                    'merchant_order_id': get_text_from_node(order, 'MerchantOrderID'),
+                    'purchase_date': get_text_from_node(order, 'PurchaseDate'),
+                    'last_updated_date': get_text_from_node(order, 'LastUpdatedDate'),
+                    'order_status': get_text_from_node(order, 'OrderStatus'),
+                    'sales_channel': get_text_from_node(order, 'SalesChannel'),
+                    'fulfillment_channel': get_text_from_node(fulfillment_data, 'FulfillmentChannel'),
+                    'ship_service_level': get_text_from_node(fulfillment_data, 'ShipServiceLevel'),
+                    'address_type': get_text_from_node(address, 'AddressType', default=get_text_from_node(order, 'AddressType')),
+                    'ship_city': get_text_from_node(address, 'City'),
+                    'ship_state': get_text_from_node(address, 'State'),
+                    'ship_postal_code': get_text_from_node(address, 'PostalCode'),
+                    'ship_country': get_text_from_node(address, 'Country'),
+                    'is_business_order': get_text_from_node(order, 'IsBusinessOrder'),
+                    'payment_method_details': get_text_from_node(order, 'PaymentMethodDetails'),
+                    'buyer_tax_registration_country': get_text_from_node(order, 'BuyerTaxRegistrationCountry'),
+                    'buyer_tax_registration_type': get_text_from_node(order, 'BuyerTaxRegistrationType'),
+                    'purchase_order_number': get_text_from_node(order, 'PurchaseOrderNumber'),
+                    'is_replacement_order': get_text_from_node(order, 'IsReplacementOrder'),
+                    'is_exchange_order': get_text_from_node(order, 'IsExchangeOrder'),
+                    'original_order_id': get_text_from_node(order, 'OriginalOrderID'),
+                    'is_iba': get_text_from_node(order, 'IsIba'),
+                    'ioss_number': get_text_from_node(order, 'IossNumber'),
+                }
+
+                for item in order.findall('OrderItem'):
+                    item_price_node = item.find('ItemPrice')
+                    promotion_node = item.find('Promotion')
+
+                    item_details = {
+                        'amazon_order_item_code': get_text_from_node(item, 'AmazonOrderItemCode'),
+                        'product_name': get_text_from_node(item, 'ProductName'),
+                        'sku': get_text_from_node(item, 'SKU'),
+                        'asin': get_text_from_node(item, 'ASIN'),
+                        'item_status': get_text_from_node(item, 'ItemStatus'),
+                        'quantity': int(get_text_from_node(item, 'Quantity', '0')),
+                        'number_of_items': int(get_text_from_node(item, 'NumberOfItems', '0')),
+                        'currency': item_price_node.find('.//Amount').get('currency') if item_price_node and item_price_node.find('.//Amount') is not None else '',
+                        'item_price': get_price_component(item_price_node, 'Principal'),
+                        'item_tax': get_price_component(item_price_node, 'Tax'),
+                        'shipping_price': get_price_component(item_price_node, 'Shipping'),
+                        'shipping_tax': get_price_component(item_price_node, 'ShippingTax'),
+                        'gift_wrap_price': get_price_component(item_price_node, 'GiftWrap'),
+                        'gift_wrap_tax': get_price_component(item_price_node, 'GiftWrapTax'),
+                        'vat_exclusive_item_price': get_price_component(item_price_node, 'VatExclusiveItemPrice'),
+                        'vat_exclusive_shipping_price': get_price_component(item_price_node, 'VatExclusiveShippingPrice'),
+                        'vat_exclusive_giftwrap_price': get_price_component(item_price_node, 'VatExclusiveGiftWrapPrice'),
+                        'promotion_ids': get_text_from_node(promotion_node, 'PromotionIDs'),
+                        'item_promotion_discount': float(get_text_from_node(promotion_node, 'ItemPromotionDiscount', '0.0')),
+                        'ship_promotion_discount': float(get_text_from_node(promotion_node, 'ShipPromotionDiscount', '0.0')),
+                        'tax_collection_model': get_text_from_node(item, 'TaxCollectionModel'),
+                        'tax_collection_responsible_party': get_text_from_node(item, 'TaxCollectionResponsibleParty'),
+                        'is_heavy_or_bulky': get_text_from_node(item, 'IsHeavyOrBulky'),
+                        'is_amazon_invoiced': get_text_from_node(item, 'IsAmazonInvoiced'),
+                        'is_transparency': get_text_from_node(item, 'IsTransparency'),
+                        'is_buyer_requested_cancellation': get_text_from_node(item, 'IsBuyerRequestedCancellation'),
+                        'buyer_requested_cancel_reason': get_text_from_node(item, 'BuyerRequestedCancel/Reason'),
+                        'amazon_programs': get_text_from_node(item, './/AmazonProgramName'),
+                        'buyer_company_name': get_text_from_node(item, 'BuyerInfo/BuyerCompanyName'),
+                    }
+
+                    flat_record = {**order_details, **item_details}
+                    all_order_items.append(flat_record)
+
+            logging.info(f"Completed parsing. Found {len(all_order_items)} order items.")
+            return pd.DataFrame(all_order_items)
+
+        except ET.ParseError as e:
+            logging.error(f"Failed to parse XML data: {e}")
+            return pd.DataFrame()
 
     def fetch_financial_events(self, next_token=None):
         # Fetch financial events from Amazon SP-API
