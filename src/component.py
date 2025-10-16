@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import warnings
 import re
 import random
+import gc
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -46,6 +47,11 @@ class Component(ComponentBase):
         super().__init__()
         self.setup_logging()
         self.all_ads_data = pd.DataFrame()
+        
+    def cleanup_memory(self):
+        """Explicitne vyčistí pamäť pre Keboola"""
+        gc.collect()
+        logging.info("Memory cleanup performed")
 
     def setup_logging(self):
         logging.basicConfig(level=logging.INFO,
@@ -112,6 +118,7 @@ class Component(ComponentBase):
         if self.run_orders:
             logging.info('Executing FBM orders...')
             self.handle_orders()
+            self.cleanup_memory()
         if self.run_returns:
             logging.info('Executing FBM returns...')
             self.handle_returns()
@@ -198,6 +205,9 @@ class Component(ComponentBase):
                     if not temp_data.empty:
                         all_orders_data = pd.concat(
                             [all_orders_data, temp_data], ignore_index=True)
+                        if len(all_orders_data) > 10000:  
+                            logging.info(f"Processing {len(all_orders_data)} orders so far...")
+                            self.cleanup_memory()
         # Log before processing data
         logging.info(
             f"Number of records to process for orders: {len(all_orders_data)}")
