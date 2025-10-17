@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import warnings
 import re
 import random
+import inspect
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -182,33 +183,41 @@ class Component(ComponentBase):
             logging.info('Skipping Amazon Ads reports as per configuration.')
 
     def handle_orders(self):
-        # Fetch and process order data
-        self.all_orders_data = pd.DataFrame()
-        order_segments = self.split_date_range(self.date_range, 28)
-        # Initialize a DataFrame to hold all orders data.
-        all_orders_data = pd.DataFrame()
+        order_segments = self.split_date_range(self.date_range, 15)
+        
+        output_file_name = 'orders.csv'
+        primary_keys = ['amazon-order-id', 'sku', 'asin']
+        table_path = self.create_out_table_definition(
+            output_file_name, incremental=True, primary_key=primary_keys
+        ).full_path
+        
+        is_first_chunk = True
+
         for mp in self.marketplace_ids:
             for start_date, end_date in order_segments:
                 logging.info(f"Creating report for marketplace: {mp}")
                 report_id = self.create_report(
-                    start_date, end_date, "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", mp)
+                    start_date, end_date, "GET_XML_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL", mp)
+                
                 if report_id:
-                    temp_data = self.poll_report_status_and_download(report_id, pd.DataFrame(
-                    ), 'orders.csv', is_xml=False, primary_keys=['amazon-order-id', 'sku', 'asin'])
-                    if not temp_data.empty:
-                        all_orders_data = pd.concat(
-                            [all_orders_data, temp_data], ignore_index=True)
-        # Log before processing data
-        logging.info(
-            f"Number of records to process for orders: {len(all_orders_data)}")
-        # Write to CSV after collecting data from all reports
-        if not all_orders_data.empty:
-            # In case of endpoint not being marketplace-sensitive
-            all_orders_data.drop_duplicates(keep='first', inplace=True)
-            self.process_data(all_orders_data, 'orders.csv', [
-                              'amazon-order-id', 'sku', 'asin'])
-        else:
-            logging.warning("No order data to process.")
+                    report_generator = self.poll_report_status_and_download(
+                        report_id, None, 'orders.csv', is_xml=True, primary_keys=primary_keys
+                    )
+                    
+                    for df_chunk in report_generator:
+                        if not df_chunk.empty:
+                            df_chunk.to_csv(
+                                table_path, 
+                                mode='a',
+                                header=is_first_chunk, 
+                                index=False
+                            )
+                            is_first_chunk = False
+            break
+        
+        if is_first_chunk:
+            logging.warning("No order data was processed, skipping deduplication.")
+            return
 
     def handle_inventory(self):
             """
@@ -598,9 +607,12 @@ class Component(ComponentBase):
                     document_id = response.json().get('reportDocumentId')
                     data_frame = self.download_report(
                         document_id, data_frame, file_name, is_xml, primary_keys)
-                    logging.info(
-                        f"Data from report {report_id} loaded, records: {len(data_frame)}")
-                    return data_frame  # Return the updated dataframe
+                    if inspect.isgenerator(data_frame):
+                        logging.info(f"Data stream from report {report_id} is ready for processing.")
+                    else:
+                        logging.info(
+                            f"Data from report {report_id} loaded, records: {len(data_frame)}")
+                    return data_frame # Return the updated dataframe or generator
                 elif status in ['CANCELLED', 'FATAL']:
                     logging.error(
                         "Report processing ended with status: %s", status)
@@ -612,7 +624,7 @@ class Component(ComponentBase):
                 logging.error(
                     "Failed to poll report status: %s", response.text)
                 break
-        return pd.DataFrame()  # Return an empty DataFrame if failed
+        return [] # Return an empty list on failure, which works safely with a 'for' loop
 
     def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys):
         # Download the report document from Amazon SP-API
@@ -623,20 +635,23 @@ class Component(ComponentBase):
         response = self.controlled_request('get', url, headers=headers)
         if response and response.status_code == 200:
             document_url = response.json().get('url')
-            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml)
+            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml, file_name)
         else:
             logging.error(f"Failed to download document: {response.text}")
             # Ensure this returns an empty DataFrame on failure.
             return pd.DataFrame()
 
-    def process_document(self, document_url, compression_algorithm, is_xml):
+    def process_document(self, document_url, compression_algorithm, is_xml, file_name):
         # Process the document after downloading, convert from XML/CSV as needed
         response = self.controlled_request('get', document_url)
         if response and response.status_code == 200:
             content = gzip.decompress(
                 response.content) if compression_algorithm == 'GZIP' else response.content
             if is_xml:
-                data_frame = self.parse_xml_data(content)
+                if file_name == 'orders.csv':
+                    data_frame = self.parse_all_orders_xml_report(content)
+                else:
+                    data_frame = self.parse_xml_data(content)
             else:
                 data_frame = pd.read_csv(io.StringIO(
                     content.decode('utf-8')), delimiter='\t')
@@ -685,6 +700,121 @@ class Component(ComponentBase):
         logging.info("Completed parsing XML data.")
         return pd.DataFrame(all_records)
 
+    def parse_all_orders_xml_report(self, xml_data):
+        """
+        Parses XML data from an All Orders report using a memory-efficient
+        stream parser (iterparse) and yields the data in manageable chunks.
+        """
+        CHUNK_SIZE = 2000
+
+        # Helper functions are unchanged
+        def get_text_from_node(node, path, default=''):
+            if node is None:
+                return default
+            found_node = node.find(path)
+            return found_node.text.strip() if found_node is not None and found_node.text else default
+
+        def get_price_component(item_price_node, component_type, default=0.0):
+            if item_price_node is None:
+                return default
+            for component in item_price_node.findall('Component'):
+                if get_text_from_node(component, 'Type') == component_type:
+                    amount_node = component.find('Amount')
+                    return float(amount_node.text) if amount_node is not None and amount_node.text else default
+            return default
+
+        try:
+            chunk_items = []
+            context = io.BytesIO(xml_data)
+
+            for event, elem in ET.iterparse(context, events=('end',)):
+                if elem.tag == 'Message':
+                    order = elem.find('Order')
+                    if order is None:
+                        elem.clear()
+                        continue
+
+                    fulfillment_data = order.find('FulfillmentData')
+                    address = fulfillment_data.find('Address') if fulfillment_data is not None else None
+                    
+                    order_details = {
+                        'amazon_order_id': get_text_from_node(order, 'AmazonOrderID'),
+                        'merchant_order_id': get_text_from_node(order, 'MerchantOrderID'),
+                        'purchase_date': get_text_from_node(order, 'PurchaseDate'),
+                        'last_updated_date': get_text_from_node(order, 'LastUpdatedDate'),
+                        'order_status': get_text_from_node(order, 'OrderStatus'),
+                        'sales_channel': get_text_from_node(order, 'SalesChannel'),
+                        'fulfillment_channel': get_text_from_node(fulfillment_data, 'FulfillmentChannel'),
+                        'ship_service_level': get_text_from_node(fulfillment_data, 'ShipServiceLevel'),
+                        'address_type': get_text_from_node(address, 'AddressType', default=get_text_from_node(order, 'AddressType')),
+                        'ship_city': get_text_from_node(address, 'City'),
+                        'ship_state': get_text_from_node(address, 'State'),
+                        'ship_postal_code': get_text_from_node(address, 'PostalCode'),
+                        'ship_country': get_text_from_node(address, 'Country'),
+                        'is_business_order': get_text_from_node(order, 'IsBusinessOrder'),
+                        'payment_method_details': get_text_from_node(order, 'PaymentMethodDetails'),
+                        'buyer_tax_registration_country': get_text_from_node(order, 'BuyerTaxRegistrationCountry'),
+                        'buyer_tax_registration_type': get_text_from_node(order, 'BuyerTaxRegistrationType'),
+                        'purchase_order_number': get_text_from_node(order, 'PurchaseOrderNumber'),
+                        'is_replacement_order': get_text_from_node(order, 'IsReplacementOrder'),
+                        'is_exchange_order': get_text_from_node(order, 'IsExchangeOrder'),
+                        'original_order_id': get_text_from_node(order, 'OriginalOrderID'),
+                        'is_iba': get_text_from_node(order, 'IsIba'),
+                        'ioss_number': get_text_from_node(order, 'IossNumber'),
+                    }
+
+                    for item in order.findall('OrderItem'):
+                        item_price_node = item.find('ItemPrice')
+                        promotion_node = item.find('Promotion')
+                        item_details = {
+                            'amazon_order_item_code': get_text_from_node(item, 'AmazonOrderItemCode'),
+                            'product_name': get_text_from_node(item, 'ProductName'),
+                            'sku': get_text_from_node(item, 'SKU'),
+                            'asin': get_text_from_node(item, 'ASIN'),
+                            'item_status': get_text_from_node(item, 'ItemStatus'),
+                            'quantity': int(get_text_from_node(item, 'Quantity', '0')),
+                            'number_of_items': int(get_text_from_node(item, 'NumberOfItems', '0')),
+                            'currency': item_price_node.find('.//Amount').get('currency') if item_price_node and item_price_node.find('.//Amount') is not None else '',
+                            'item_price': get_price_component(item_price_node, 'Principal'),
+                            'item_tax': get_price_component(item_price_node, 'Tax'),
+                            'shipping_price': get_price_component(item_price_node, 'Shipping'),
+                            'shipping_tax': get_price_component(item_price_node, 'ShippingTax'),
+                            'gift_wrap_price': get_price_component(item_price_node, 'GiftWrap'),
+                            'gift_wrap_tax': get_price_component(item_price_node, 'GiftWrapTax'),
+                            'vat_exclusive_item_price': get_price_component(item_price_node, 'VatExclusiveItemPrice'),
+                            'vat_exclusive_shipping_price': get_price_component(item_price_node, 'VatExclusiveShippingPrice'),
+                            'vat_exclusive_giftwrap_price': get_price_component(item_price_node, 'VatExclusiveGiftWrapPrice'),
+                            'promotion_ids': get_text_from_node(promotion_node, 'PromotionIDs'),
+                            'item_promotion_discount': float(get_text_from_node(promotion_node, 'ItemPromotionDiscount', '0.0')),
+                            'ship_promotion_discount': float(get_text_from_node(promotion_node, 'ShipPromotionDiscount', '0.0')),
+                            'tax_collection_model': get_text_from_node(item, 'TaxCollectionModel'),
+                            'tax_collection_responsible_party': get_text_from_node(item, 'TaxCollectionResponsibleParty'),
+                            'is_heavy_or_bulky': get_text_from_node(item, 'IsHeavyOrBulky'),
+                            'is_amazon_invoiced': get_text_from_node(item, 'IsAmazonInvoiced'),
+                            'is_transparency': get_text_from_node(item, 'IsTransparency'),
+                            'is_buyer_requested_cancellation': get_text_from_node(item, 'IsBuyerRequestedCancellation'),
+                            'buyer_requested_cancel_reason': get_text_from_node(item, 'BuyerRequestedCancel/Reason'),
+                            'amazon_programs': get_text_from_node(item, './/AmazonProgramName'),
+                            'buyer_company_name': get_text_from_node(item, 'BuyerInfo/BuyerCompanyName'),
+                        }
+                        flat_record = {**order_details, **item_details}
+                        chunk_items.append(flat_record)
+
+                    # When the chunk is full, yield it as a DataFrame and reset the list
+                    if len(chunk_items) >= CHUNK_SIZE:
+                        yield pd.DataFrame(chunk_items)
+                        chunk_items = []
+
+                    elem.clear()
+
+            # After the loop, yield any remaining items in the last partial chunk
+            if chunk_items:
+                yield pd.DataFrame(chunk_items)
+                
+        except ET.ParseError as e:
+            logging.error(f"Failed to parse XML data: {e}")
+            return
+    
     def fetch_financial_events(self, next_token=None):
         # Fetch financial events from Amazon SP-API
         logging.info("Fetching financial events.")
