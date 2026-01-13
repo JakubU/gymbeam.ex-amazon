@@ -356,6 +356,13 @@ class Component(ComponentBase):
             combined_df = pd.concat(all_dfs, ignore_index=True)
             combined_df.columns = [self.camel_to_snake(col).replace('.', '_') for col in combined_df.columns]
             
+            # Remove duplicate marketplace_id columns - keep only the first one
+            marketplace_id_cols = [col for col in combined_df.columns if col == 'marketplace_id']
+            if len(marketplace_id_cols) > 1:
+                # Keep the first occurrence, remove all others
+                cols_to_drop = marketplace_id_cols[1:]
+                combined_df = combined_df.drop(columns=cols_to_drop)
+            
             final_pks = ['extracted_at', 'marketplace_id']
             self.process_data(combined_df, 'delivery_performance.csv', final_pks)
             logging.info(f"Total Delivery Performance records processed: {len(combined_df)}")

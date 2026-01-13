@@ -19,43 +19,16 @@
     }
   },
   "parameters": {
-    "marketplace_id": "APJ6JRA9NG5V4",
-    "#refresh_token": "YOUR_REFRESH_TOKEN",
-    "#app_id": "YOUR_APP_ID",
-    "#client_secret_id": "YOUR_CLIENT_SECRET_ID",
-    "date_range": "7",
-    "#refresh_token_ads": "YOUR_ADS_REFRESH_TOKEN",
-    "#app_id_ads": "YOUR_ADS_APP_ID",
-    "#client_secret_id_ads": "YOUR_ADS_CLIENT_SECRET_ID",
-    "stores": [
-      {
-        "name": "Amazon.it",
-        "scope": "YOUR_SCOPE_ID"
-      }
+    "#api_token": "demo",
+    "period_from": "yesterday",
+    "endpoints": [
+      "deals",
+      "companies"
     ],
-    "marketplaces": [
-      {
-        "marketplace_id": "APJ6JRA9NG5V4",
-        "strategic_products": [
-          "B08NFDRNP5",
-          "B0DFHCWBDJ"
-        ]
-      }
-    ],
-    "execution": {
-      "run_inventory": false,
-      "run_inventory_planning": false,
-      "run_orders": false,
-      "run_returns": false,
-      "run_finances": false,
-      "run_ads": false,
-      "run_ledger": false,
-      "run_strategic_products": false,
-      "run_seller_feedback": false,
-      "run_performance_report": false
-    }
+    "company_properties": "",
+    "deal_properties": "",
+    "debug": true
   },
-  "action": "run",
   "image_parameters": {
     "syrup_url": "https://syrup.keboola.com/"
   },
@@ -70,10 +43,10 @@
           "description": "me@keboola.com"
         },
         "created": "2016-01-31 00:13:30",
-        "#data": "{\"refresh_token\":\"XXXXX-TOKEN\"}",
+        "#data": "{\"refresh_token\":\"MCWBkfdK9m5YK*Oqahwm6XN6elMAEwcH5kYcK8Ku!bpiOgSDZN9MQIzunpMsh6LyKH0i!7OcwwwajuxPfvm2PrrWYSs*HerDr2ZSJ39pqHJcvwUNIvHdtcgFFr3Em*yhn3GKBwM2p9UrjtgdAriSDny5YgUYGuI3gYJY1ypD*wBaAOzzeeXZx6CdgjruJ7gboTAngbWk3CzO9rORIwXAAlGUH6ZgBQJL3AwkYVMRFV4BvIvDAMF*0DcGDyrcyYDw9X3vYn*Wy!OqgrenKCGowdJk0C0136SUv4PJI383y76UMim6Q7KGDj7Lf!K2N2FDbxsz2iZKZTBr2vHx8pEC1oBc$\"}",
         "oauthVersion": "2.0",
-        "appKey": "12345",
-        "#appSecret": "123qwe-CiN"
+        "appKey": "000000004C184A49",
+        "#appSecret": "vBAYak49pVK1zghHAgDH4tCSCNlT-CiN"
       }
     }
   }
