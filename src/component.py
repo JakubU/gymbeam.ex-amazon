@@ -12,6 +12,7 @@ import warnings
 import re
 import random
 import inspect
+import ast
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -40,7 +41,9 @@ KEY_RUN_RETURNS = 'run_returns'
 KEY_RUN_FINANCES = 'run_finances'
 KEY_RUN_ADS = 'run_ads'
 KEY_RUN_LEDGER = 'run_ledger'
-KEY_RUN_STRATEGIC_PRODUCTS = 'run_startegic_products'
+KEY_RUN_STRATEGIC_PRODUCTS = 'run_strategic_products'
+KEY_RUN_SELLER_FEEDBACK = 'run_seller_feedback'
+KEY_RUN_PERFORMANCE_REPORT = 'run_performance_report'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -85,7 +88,9 @@ class Component(ComponentBase):
         self.run_finances = exec_cfg.get(KEY_RUN_FINANCES, True)
         self.run_ads = exec_cfg.get(KEY_RUN_ADS, True)
         self.run_ledger = exec_cfg.get(KEY_RUN_LEDGER, True)
-        self.run_startegic_products = exec_cfg.get(KEY_RUN_STRATEGIC_PRODUCTS, True)
+        self.run_strategic_products = exec_cfg.get(KEY_RUN_STRATEGIC_PRODUCTS, True)
+        self.run_seller_feedback = exec_cfg.get(KEY_RUN_SELLER_FEEDBACK, True)
+        self.run_performance_report = exec_cfg.get(KEY_RUN_PERFORMANCE_REPORT, True)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
@@ -119,9 +124,15 @@ class Component(ComponentBase):
         if self.run_finances:
             logging.info('Executing FBM finances...')
             self.handle_finances()
-        if self.run_startegic_products:
+        if self.run_strategic_products:
             logging.info('Executing Amazon strategic products...')
             self.handle_strategic_products()
+        if self.run_seller_feedback:
+            logging.info('Executing Amazon seller feedback...')
+            self.handle_seller_feedback()
+        if self.run_performance_report:
+            logging.info('Executing Amazon performance report...')
+            self.handle_performance_report()
         
         # FBA ledger reports (detail and summary) need correct date ordering
         if self.run_ledger:
@@ -218,6 +229,138 @@ class Component(ComponentBase):
         if is_first_chunk:
             logging.warning("No order data was processed, skipping deduplication.")
             return
+
+    def handle_seller_feedback(self):
+        logging.info("Fetching Seller Feedback for marketplaces: %s", self.marketplace_ids)
+        review_segments = self.split_date_range(self.date_range, 100)
+        
+        target_columns = ['date', 'rating', 'comments', 'response', 'order_id', 'rater_email']
+        all_dfs = []
+
+        for mp in self.marketplace_ids:
+            for start_date, end_date in review_segments:
+                logging.info(f"Creating Seller Feedback report for marketplace: {mp}")
+                
+                report_id = self.create_report(
+                    start_date, 
+                    end_date, 
+                    "GET_SELLER_FEEDBACK_DATA", 
+                    mp
+                )
+                
+                if report_id:
+                    df = self.poll_report_status_and_download(
+                        report_id, 
+                        pd.DataFrame(), 
+                        'seller_feedback.csv', 
+                        is_xml=False, 
+                        primary_keys=[],
+                        is_json=False
+                    )
+                    
+                    if not df.empty:
+                        if len(df.columns) == len(target_columns):
+                            df.columns = target_columns
+                        else:
+                            logging.warning(f"Column count mismatch in {mp}. Expected {len(target_columns)}, got {len(df.columns)}")
+                            df.rename(columns=lambda x: self.shorten_column(x), inplace=True)
+                        
+                        df['date'] = df['date'].str.replace('.', '/', regex=False)
+                        df['date'] = pd.to_datetime(df['date'], format='%d/%m/%y', errors='coerce').dt.strftime('%Y-%m-%d')
+
+                        df['marketplace_id'] = mp
+                        df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        all_dfs.append(df)
+
+                    else:
+                        logging.warning(f"No feedback data found for marketplace {mp}.")
+
+        if all_dfs:
+            combined_df = pd.concat(all_dfs, ignore_index=True)
+            
+            final_pks = ['date', 'rating', 'comments', 'response', 'order_id', 'rater_email']
+            
+            self.process_data(combined_df, 'seller_feedback.csv', final_pks)
+            logging.info(f"Total Seller Feedback records processed: {len(combined_df)}")
+        else:
+            logging.warning("No Seller Feedback data fetched.")
+    
+    def handle_performance_report(self):
+        review_segments = self.split_date_range(self.date_range, 100)
+        all_dfs = []
+
+        def flatten_all_lists(obj):
+            if isinstance(obj, list):
+                # Convert list to dict with string indices
+                return {str(i): flatten_all_lists(v) for i, v in enumerate(obj)}
+            if isinstance(obj, dict):
+                return {k: flatten_all_lists(v) for k, v in obj.items()}
+            return obj
+
+        for mp in self.marketplace_ids:
+            for start_date, end_date in review_segments:
+                logging.info(f"Creating Performance report for marketplace: {mp}")
+                
+                report_id = self.create_report(
+                    start_date, 
+                    end_date, 
+                    "GET_V2_SELLER_PERFORMANCE_REPORT", 
+                    mp
+                )
+                
+                if report_id:
+                    df = self.poll_report_status_and_download(
+                        report_id, 
+                        pd.DataFrame(), 
+                        'delivery_performance_raw.csv', 
+                        is_xml=False, 
+                        primary_keys=[],
+                        is_json=True 
+                    )
+                    
+                    if not df.empty and 'performanceMetrics' in df.columns:
+                        def _extract_and_flatten(row):
+                            try:
+                                if isinstance(row, list): 
+                                    data_list = row
+                                elif isinstance(row, str): 
+                                    data_list = ast.literal_eval(row)
+                                else: 
+                                    return {}
+                                    
+                                if data_list and isinstance(data_list, list) and len(data_list) > 0:
+                                    raw_data = data_list[0]
+                                    return flatten_all_lists(raw_data)
+                                return {}
+                            except (ValueError, SyntaxError):
+                                return {}
+
+                        metrics_dicts = df['performanceMetrics'].apply(_extract_and_flatten).tolist()
+                        
+                        flat_metrics_df = pd.json_normalize(metrics_dicts)
+                        
+                        flat_metrics_df['marketplace_id'] = mp
+                        flat_metrics_df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        
+                        if 'accountStatuses' in df.columns:
+                            statuses_dicts = df['accountStatuses'].apply(_extract_and_flatten).tolist()
+                            flat_statuses = pd.json_normalize(statuses_dicts)
+                            flat_statuses = flat_statuses.add_prefix('account_')
+                            flat_metrics_df = pd.concat([flat_metrics_df, flat_statuses], axis=1)
+
+                        all_dfs.append(flat_metrics_df)
+                    else:
+                        logging.warning(f"No performance data found for marketplace {mp}.")
+
+        if all_dfs:
+            combined_df = pd.concat(all_dfs, ignore_index=True)
+            combined_df.columns = [self.camel_to_snake(col).replace('.', '_') for col in combined_df.columns]
+            
+            final_pks = ['extracted_at', 'marketplace_id']
+            self.process_data(combined_df, 'delivery_performance.csv', final_pks)
+            logging.info(f"Total Delivery Performance records processed: {len(combined_df)}")
+        else:
+            logging.warning("No Delivery Performance data fetched.")
 
     def handle_inventory(self):
             """
@@ -592,7 +735,7 @@ class Component(ComponentBase):
             logging.error(f"Failed to create ledger report: {resp.text}")
             return None
 
-    def poll_report_status_and_download(self, report_id, data_frame, file_name, is_xml, primary_keys):
+    def poll_report_status_and_download(self, report_id, data_frame, file_name, is_xml, primary_keys, is_json=False):
         # Check report status and download when ready
         logging.info(f"Polling report status for ID {report_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports/{report_id}"
@@ -606,7 +749,7 @@ class Component(ComponentBase):
                 if status == 'DONE':
                     document_id = response.json().get('reportDocumentId')
                     data_frame = self.download_report(
-                        document_id, data_frame, file_name, is_xml, primary_keys)
+                        document_id, data_frame, file_name, is_xml, primary_keys, is_json)
                     if inspect.isgenerator(data_frame):
                         logging.info(f"Data stream from report {report_id} is ready for processing.")
                     else:
@@ -624,9 +767,10 @@ class Component(ComponentBase):
                 logging.error(
                     "Failed to poll report status: %s", response.text)
                 break
-        return [] # Return an empty list on failure, which works safely with a 'for' loop
+        # Return an empty DataFrame on failure instead of empty list
+        return pd.DataFrame()
 
-    def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys):
+    def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys, is_json=False):
         # Download the report document from Amazon SP-API
         logging.info(f"Downloading report document ID: {document_id}.")
         url = f"https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/documents/{document_id}"
@@ -635,14 +779,14 @@ class Component(ComponentBase):
         response = self.controlled_request('get', url, headers=headers)
         if response and response.status_code == 200:
             document_url = response.json().get('url')
-            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml, file_name)
+            return self.process_document(document_url, response.json().get('compressionAlgorithm', ''), is_xml, file_name, is_json)
         else:
             logging.error(f"Failed to download document: {response.text}")
             # Ensure this returns an empty DataFrame on failure.
             return pd.DataFrame()
 
-    def process_document(self, document_url, compression_algorithm, is_xml, file_name):
-        # Process the document after downloading, convert from XML/CSV as needed
+    def process_document(self, document_url, compression_algorithm, is_xml, file_name, is_json=False):
+        # Process the document after downloading, convert from XML/CSV/JSON as needed
         response = self.controlled_request('get', document_url)
         if response and response.status_code == 200:
             content = gzip.decompress(
@@ -652,6 +796,9 @@ class Component(ComponentBase):
                     data_frame = self.parse_all_orders_xml_report(content)
                 else:
                     data_frame = self.parse_xml_data(content)
+            elif is_json:
+                json_data = json.loads(content.decode('utf-8'))
+                data_frame = pd.json_normalize(json_data)
             else:
                 data_frame = pd.read_csv(io.StringIO(
                     content.decode('utf-8')), delimiter='\t')
