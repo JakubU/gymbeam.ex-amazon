@@ -266,7 +266,7 @@ class Component(ComponentBase):
                             df.rename(columns=lambda x: self.shorten_column(x), inplace=True)
                         
                         df['date'] = df['date'].str.replace('.', '/', regex=False)
-                        df['date'] = pd.to_datetime(df['date'], format='%d/%m/%y', errors='coerce').dt.strftime('%Y-%m-%d')
+                        df['date'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
 
                         df['marketplace_id'] = mp
                         df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
