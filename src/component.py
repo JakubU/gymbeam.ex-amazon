@@ -1079,8 +1079,8 @@ class Component(ComponentBase):
         # Populate DataFrame with shipment data
         for event in data['payload']['FinancialEvents']['ShipmentEventList']:
             for item in event['ShipmentItemList']:
-                # Initialize row with all possible columns set to empty values
-                row = {col: '' for col in columns}
+                # Initialize row: 0 for _amount columns, '' for others
+                row = {col: (0 if col.endswith('_amount') else '') for col in columns}
                 row.update({
                     'amazon_order_id': event.get('AmazonOrderId', ''),
                     'marketplace_name': event.get('MarketplaceName', ''),
@@ -1118,8 +1118,8 @@ class Component(ComponentBase):
         # Populate DataFrame with refund data
         for event in data['payload']['FinancialEvents']['RefundEventList']:
             for item in event['ShipmentItemAdjustmentList']:
-                # Initialize row with all possible columns set to empty values
-                row = {col: '' for col in columns}
+                # Initialize row: 0 for _amount columns, '' for others
+                row = {col: (0 if col.endswith('_amount') else '') for col in columns}
                 row.update({
                     'amazon_order_id': event.get('AmazonOrderId', ''),
                     'marketplace_name': event.get('MarketplaceName', ''),
