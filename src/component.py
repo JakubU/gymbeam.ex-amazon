@@ -657,6 +657,7 @@ class Component(ComponentBase):
         Fetch and process Amazon settlement report.
         Uses SP-API to find system-generated reports, deduplicates regional IDs, 
         paces downloads, and writes directly to CSV to minimize memory footprint.
+        Identifies split records by assigning an incrementing split_index (0, 1, 2...) to duplicate PKs across chunks.
         """
         logging.info("Fetching Amazon settlement reports for region...")
         unique_report_ids = set()
@@ -682,7 +683,7 @@ class Component(ComponentBase):
 
         logging.info(f"Found {len(unique_report_ids)} unique settlement reports to download.")
         output_file_name = 'settlement_report.csv'
-        primary_keys = ['settlement_id', 'order_id', 'sku', 'marketplace_name'] 
+        primary_keys = ['settlement_id', 'order_id', 'sku', 'amount_type', 'amount_description', 'transaction_type', 'split_index']
         
         table_path = self.create_out_table_definition(
             output_file_name, incremental=True, primary_key=primary_keys
@@ -704,11 +705,12 @@ class Component(ComponentBase):
             # Process chunk-by-chunk if a generator is returned
             if inspect.isgenerator(report_generator):
                 
-                # File-level metadata to hold across all chunks. Only needed for settlement report.
+                # File-level metadata to hold across all chunks.
                 file_primary_mkp = None
                 file_start_date = None
                 file_end_date = None
                 file_settlement_id = None
+                split_tracker = {}
 
                 for df in report_generator:
                     if not df.empty:
@@ -737,7 +739,6 @@ class Component(ComponentBase):
                             if not valid_marketplaces.empty:
                                 file_primary_mkp = valid_marketplaces.mode()[0]
 
-
                         # Apply the extracted file-level data to the current chunk.
                         if 'settlement_start_date' in df.columns and file_start_date:
                             df['settlement_start_date'] = file_start_date
@@ -749,9 +750,25 @@ class Component(ComponentBase):
                             df['settlement_id'] = file_settlement_id
 
                         if mkp_col:
-                            # We only fill blanks for marketplace, because order rows might have different regions.
                             df[mkp_col] = df[mkp_col].replace(r'^\s*$', pd.NA, regex=True)
                             df[mkp_col].fillna(file_primary_mkp if file_primary_mkp else 'Unallocated', inplace=True)
+
+                        # Identify split records by assigning an incrementing split_index (0, 1, 2...) to duplicate PKs across chunks.
+                        base_pk_cols = ['settlement_id', 'order_id', 'sku', 'amount_type', 'amount_description', 'transaction_type']
+                        existing_pk_cols = [col for col in base_pk_cols if col in df.columns]
+                        
+                        if len(existing_pk_cols) == len(base_pk_cols):
+                            records = df[existing_pk_cols].fillna('').itertuples(index=False, name=None)
+                            
+                            split_indices = []
+                            for pk_tuple in records:
+                                current_count = split_tracker.get(pk_tuple, 0)
+                                split_indices.append(current_count)
+                                split_tracker[pk_tuple] = current_count + 1
+                                
+                            df['split_index'] = split_indices
+                        else:
+                            df['split_index'] = 0
 
                         df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
                         
@@ -773,7 +790,6 @@ class Component(ComponentBase):
             else:
                 logging.warning(f"No data downloaded for report ID {report_id}")
             
-            # Pacing the requests to preserve the API burst limit.
             time.sleep(3)
 
         if total_records_processed > 0:
