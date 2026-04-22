@@ -13,6 +13,7 @@ import re
 import random
 import inspect
 import ast
+import gc
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -44,6 +45,7 @@ KEY_RUN_LEDGER = 'run_ledger'
 KEY_RUN_STRATEGIC_PRODUCTS = 'run_strategic_products'
 KEY_RUN_SELLER_FEEDBACK = 'run_seller_feedback'
 KEY_RUN_PERFORMANCE_REPORT = 'run_performance_report'
+KEY_RUN_SETTLEMENT_REPORT = 'run_settlement_report'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -91,6 +93,7 @@ class Component(ComponentBase):
         self.run_strategic_products = exec_cfg.get(KEY_RUN_STRATEGIC_PRODUCTS, True)
         self.run_seller_feedback = exec_cfg.get(KEY_RUN_SELLER_FEEDBACK, True)
         self.run_performance_report = exec_cfg.get(KEY_RUN_PERFORMANCE_REPORT, True)
+        self.run_settlement_report = exec_cfg.get(KEY_RUN_SETTLEMENT_REPORT, True)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
@@ -133,7 +136,9 @@ class Component(ComponentBase):
         if self.run_performance_report:
             logging.info('Executing Amazon performance report...')
             self.handle_performance_report()
-        
+        if self.run_settlement_report:
+            logging.info('Executing Amazon settlement report...')
+            self.handle_settlement_report()
         # FBA ledger reports (detail and summary) need correct date ordering
         if self.run_ledger:
             logging.info('Generating FBA ledger detail and summary view reports...')
@@ -647,6 +652,135 @@ class Component(ComponentBase):
                 process_empty=True
             )
 
+    def handle_settlement_report(self) -> None:
+        """
+        Fetch and process Amazon settlement report.
+        Uses SP-API to find system-generated reports, deduplicates regional IDs, 
+        paces downloads, and writes directly to CSV to minimize memory footprint.
+        """
+        logging.info("Fetching Amazon settlement reports for region...")
+        unique_report_ids = set()
+        settlement_segments = self.split_date_range(self.date_range, 50)
+
+        for mp in self.marketplace_ids:
+            for start_date, end_date in settlement_segments:
+                logging.info(f"Querying settlement reports for marketplace: {mp}")
+                report_ids = self.get_existing_reports(
+                    start_date,
+                    end_date,
+                    "GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2", 
+                    marketplace_id=mp
+                )
+                
+                if report_ids:
+                    unique_report_ids.update(report_ids)
+            break
+
+        if not unique_report_ids:
+            logging.warning(f"No settlement reports found from {end_date} to {start_date}")
+            return None
+
+        logging.info(f"Found {len(unique_report_ids)} unique settlement reports to download.")
+        output_file_name = 'settlement_report.csv'
+        primary_keys = ['settlement_id', 'order_id', 'sku', 'marketplace_name'] 
+        
+        table_path = self.create_out_table_definition(
+            output_file_name, incremental=True, primary_key=primary_keys
+        ).full_path
+        
+        is_first_chunk = True
+        total_records_processed = 0
+
+        for report_id in unique_report_ids:
+            logging.info(f"Downloading settlement report ID: {report_id}")
+            report_generator = self.poll_report_status_and_download(
+                report_id,
+                pd.DataFrame(),
+                output_file_name,
+                is_xml=False,
+                primary_keys=[]
+            )
+
+            # Process chunk-by-chunk if a generator is returned
+            if inspect.isgenerator(report_generator):
+                
+                # File-level metadata to hold across all chunks. Only needed for settlement report.
+                file_primary_mkp = None
+                file_start_date = None
+                file_end_date = None
+                file_settlement_id = None
+
+                for df in report_generator:
+                    if not df.empty:
+                        # Rename columns to snake_case.
+                        df.rename(columns=lambda x: self.shorten_column(x).replace('-', '_'), inplace=True)
+
+                        # Extract file-level data from the first valid rows we see.
+                        if file_start_date is None and 'settlement_start_date' in df.columns:
+                            valid_starts = df['settlement_start_date'].replace(r'^\s*$', pd.NA, regex=True).dropna()
+                            if not valid_starts.empty:
+                                file_start_date = valid_starts.mode()[0]
+
+                        if file_end_date is None and 'settlement_end_date' in df.columns:
+                            valid_ends = df['settlement_end_date'].replace(r'^\s*$', pd.NA, regex=True).dropna()
+                            if not valid_ends.empty:
+                                file_end_date = valid_ends.mode()[0]
+                                
+                        if file_settlement_id is None and 'settlement_id' in df.columns:
+                            valid_ids = df['settlement_id'].replace(r'^\s*$', pd.NA, regex=True).dropna()
+                            if not valid_ids.empty:
+                                file_settlement_id = valid_ids.mode()[0]
+
+                        mkp_col = 'marketplace_name' if 'marketplace_name' in df.columns else None
+                        if mkp_col and file_primary_mkp is None:
+                            valid_marketplaces = df[mkp_col].replace(r'^\s*$', pd.NA, regex=True).dropna()
+                            if not valid_marketplaces.empty:
+                                file_primary_mkp = valid_marketplaces.mode()[0]
+
+
+                        # Apply the extracted file-level data to the current chunk.
+                        if 'settlement_start_date' in df.columns and file_start_date:
+                            df['settlement_start_date'] = file_start_date
+                            
+                        if 'settlement_end_date' in df.columns and file_end_date:
+                            df['settlement_end_date'] = file_end_date
+                            
+                        if 'settlement_id' in df.columns and file_settlement_id:
+                            df['settlement_id'] = file_settlement_id
+
+                        if mkp_col:
+                            # We only fill blanks for marketplace, because order rows might have different regions.
+                            df[mkp_col] = df[mkp_col].replace(r'^\s*$', pd.NA, regex=True)
+                            df[mkp_col].fillna(file_primary_mkp if file_primary_mkp else 'Unallocated', inplace=True)
+
+                        df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        
+                        # Write directly to disk to free up memory.
+                        df.to_csv(
+                            table_path, 
+                            mode='w' if is_first_chunk else 'a', 
+                            header=is_first_chunk, 
+                            index=False
+                        )
+                        
+                        is_first_chunk = False
+                        total_records_processed += len(df)
+                        
+                        del df
+                
+                gc.collect()
+                
+            else:
+                logging.warning(f"No data downloaded for report ID {report_id}")
+            
+            # Pacing the requests to preserve the API burst limit.
+            time.sleep(3)
+
+        if total_records_processed > 0:
+            logging.info(f"Total Amazon settlement report records successfully written to disk: {total_records_processed}")
+        else:
+            logging.warning("No Amazon settlement report data fetched.")
+
     def refresh_amazon_token(self):
         # Refresh the Amazon API token
         logging.info("Attempting to refresh the Amazon token.")
@@ -777,6 +911,36 @@ class Component(ComponentBase):
         # Return an empty DataFrame on failure instead of empty list
         return pd.DataFrame()
 
+    def get_existing_reports(self, start_date, end_date, report_type, marketplace_id):
+        """
+        Query Amazon for system-generated reports instead of creating new ones.
+        """
+        logging.info("Querying existing %s reports from %s to %s for marketplace %s",
+                     report_type, end_date, start_date, marketplace_id)
+        url = "https://sellingpartnerapi-eu.amazon.com/reports/2021-06-30/reports"
+        headers = {
+            'x-amz-access-token': self.access_token
+        }
+        
+        params = {
+            "reportTypes": report_type,
+            "marketplaceIds": marketplace_id,
+            "createdSince": end_date.isoformat(timespec='milliseconds') + 'Z',
+            "createdUntil": start_date.isoformat(timespec='milliseconds') + 'Z',
+            "pageSize": 100 
+        }
+
+        response = self.controlled_request('get', url, headers=headers, params=params)
+        
+        if response and response.status_code == 200:
+            reports = response.json().get('reports', [])
+            report_ids = [report.get('reportId') for report in reports if 'reportId' in report]
+            logging.info("Found %d existing reports.", len(report_ids))
+            return report_ids
+        else:
+            logging.error("Failed to fetch existing reports: %s", response.text if response else "No response")
+            return []
+
     def download_report(self, document_id, data_frame, file_name, is_xml, primary_keys, is_json=False):
         # Download the report document from Amazon SP-API
         logging.info(f"Downloading report document ID: {document_id}.")
@@ -807,8 +971,13 @@ class Component(ComponentBase):
                 json_data = json.loads(content.decode('utf-8'))
                 data_frame = pd.json_normalize(json_data)
             else:
-                data_frame = pd.read_csv(io.StringIO(
-                    content.decode('utf-8')), delimiter='\t')
+                byte_stream = io.BytesIO(content)
+                if file_name == 'settlement_report.csv':
+                    chunk_iter = pd.read_csv(byte_stream, delimiter='\t', encoding='utf-8', chunksize=5000)
+                    data_frame = (chunk for chunk in chunk_iter) 
+                else:
+                    data_frame = pd.read_csv(byte_stream, delimiter='\t', encoding='utf-8')
+                    
             return data_frame
         else:
             logging.error("Failed to download or process document.")
@@ -992,8 +1161,8 @@ class Component(ComponentBase):
         try:
             response = requests.request(method, url, headers=headers, params=params, data=data)
             if response.status_code == 429:  # Check if rate limit was hit
-                if retry_count < 5:  # Limit the number of retries to prevent infinite loop
-                    wait_time = (2 ** retry_count) + random.uniform(0, 1)  # Exponential backoff with jitter
+                if retry_count < 7: # Limit the number of retries to prevent infinite loop
+                    wait_time = (2 ** (retry_count + 2)) + random.uniform(0, 1) # Exponential backoff with jitter
                     logging.warning(f"Rate limit hit, retrying after {wait_time:.2f} seconds...")
                     time.sleep(wait_time)
                     return self.controlled_request(method, url, headers, params, data, retry_count + 1)

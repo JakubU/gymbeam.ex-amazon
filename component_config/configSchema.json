@@ -138,6 +138,11 @@
           "type": "boolean",
           "title": "Run Performance Reports",
           "default": false
+        },
+        "run_settlement_report": {
+          "type": "boolean",
+          "title": "Run Settlement Reports",
+          "default": false
         }
       },
       "propertyOrder": 11
