@@ -751,7 +751,7 @@ class Component(ComponentBase):
 
                         if mkp_col:
                             df[mkp_col] = df[mkp_col].replace(r'^\s*$', pd.NA, regex=True)
-                            df[mkp_col].fillna(file_primary_mkp if file_primary_mkp else 'Unallocated', inplace=True)
+                            df[mkp_col] = df[mkp_col].fillna(file_primary_mkp if file_primary_mkp else 'Unallocated')
 
                         # Identify split records by assigning an incrementing split_index (0, 1, 2...) to duplicate PKs across chunks.
                         base_pk_cols = ['settlement_id', 'order_id', 'sku', 'amount_type', 'amount_description', 'transaction_type']
