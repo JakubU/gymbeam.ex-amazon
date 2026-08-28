@@ -12,6 +12,7 @@ import warnings
 import re
 import random
 import inspect
+import hashlib
 import ast
 import gc
 
@@ -156,12 +157,27 @@ class Component(ComponentBase):
                     
                     if not df_detail.empty:
                         df_detail['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                        logging.info(f"Loaded ledger detail rows for {mp}: {len(df_detail)}")
                         
-                        logging.info(f"Original ledger detail rows for {mp}: {len(df_detail)}")
-                        deduplicated_df = df_detail.drop_duplicates(keep='first')
-                        logging.info(f"After deduplication, ledger detail rows for {mp}: {len(deduplicated_df)}")
+                        # --- VYTVORENIE PRIMÁRNEHO KĽÚČA A ZACHOVANIE DUPLICÍT ---
+                        # 1. Definovanie stĺpcov, ktoré tvoria logický riadok (okrem extracted_at)
+                        group_cols = [col for col in df_detail.columns if col not in ['extracted_at']]
                         
-                        all_details.append(deduplicated_df)
+                        # 2. Zoradenie dát pre deterministický výsledok
+                        df_detail.sort_values(by=group_cols, inplace=True, na_position='first')
+                        
+                        # 3. Očíslovanie identických riadkov (priradí 1, 2, 3 pre rovnaké predaje)
+                        df_detail['dedup_index'] = df_detail.groupby(group_cols, dropna=False).cumcount() + 1
+                        
+                        # 4. Vytvorenie unikátneho hashu (Primárneho kľúča) pre Keboolu
+                        def _generate_pk(row):
+                            val = f"{row.get('Date','')}_{row.get('MSKU','')}_{row.get('Event Type','')}_{row.get('Fulfillment Center','')}_{row.get('Quantity','')}_{row.get('Reference ID','')}_{row['dedup_index']}"
+                            return hashlib.md5(val.encode('utf-8')).hexdigest()
+
+                        df_detail['pk_movement'] = df_detail.apply(_generate_pk, axis=1)
+                        # --------------------------------------------------------
+                        
+                        all_details.append(df_detail)
 
                 summary_id = self.create_ledger_report(start_dt, end_dt, 'GET_LEDGER_SUMMARY_VIEW_DATA', marketplace_id=mp)
 
@@ -171,13 +187,19 @@ class Component(ComponentBase):
                     if not df_summary.empty:
                         df_summary['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
                         all_summaries.append(df_summary)
+                        
+                break # Only one marketplace, report is not marketplace-sensitive
 
             # After the loop, combine and process the aggregated data
             if all_details:
                 final_detail_df = pd.concat(all_details, ignore_index=True)
-                final_detail_df.drop_duplicates(keep='first', inplace=True) # Maybe redundant, but at least we will be safe
-                logging.info(f"Total processed ledger detail rows from all marketplaces after deduplication: {len(final_detail_df)}")
-                self.process_data(final_detail_df, 'inventory_ledger_detail.csv', [])
+                
+                # 5. Odstránenie ETL duplicít na základe nového PK (zachová fyzické pohyby)
+                final_detail_df.drop_duplicates(subset=['pk_movement'], keep='last', inplace=True)
+                logging.info(f"Total processed ledger detail rows from all marketplaces after PK deduplication: {len(final_detail_df)}")
+                
+                # 6. Zápis do Kebooly s definovaným PK pre Incremental Load
+                self.process_data(final_detail_df, 'inventory_ledger_detail.csv', ['pk_movement'])
             
             if all_summaries:
                 final_summary_df = pd.concat(all_summaries, ignore_index=True)
