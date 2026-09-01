@@ -46,6 +46,7 @@ KEY_RUN_STRATEGIC_PRODUCTS = 'run_strategic_products'
 KEY_RUN_SELLER_FEEDBACK = 'run_seller_feedback'
 KEY_RUN_PERFORMANCE_REPORT = 'run_performance_report'
 KEY_RUN_SETTLEMENT_REPORT = 'run_settlement_report'
+KEY_RUN_VAT_REPORT = 'run_vat_report'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -94,6 +95,7 @@ class Component(ComponentBase):
         self.run_seller_feedback = exec_cfg.get(KEY_RUN_SELLER_FEEDBACK, True)
         self.run_performance_report = exec_cfg.get(KEY_RUN_PERFORMANCE_REPORT, True)
         self.run_settlement_report = exec_cfg.get(KEY_RUN_SETTLEMENT_REPORT, True)
+        self.run_vat_report = exec_cfg.get(KEY_RUN_VAT_REPORT, False)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
@@ -139,6 +141,9 @@ class Component(ComponentBase):
         if self.run_settlement_report:
             logging.info('Executing Amazon settlement report...')
             self.handle_settlement_report()
+        if self.run_vat_report:
+            logging.info('Executing Amazon VAT transactions report...')
+            self.handle_vat_report()
         # FBA ledger reports (detail and summary) need correct date ordering
         if self.run_ledger:
             logging.info('Generating FBA ledger detail and summary view reports...')
@@ -796,6 +801,46 @@ class Component(ComponentBase):
             logging.info(f"Total Amazon settlement report records successfully written to disk: {total_records_processed}")
         else:
             logging.warning("No Amazon settlement report data fetched.")
+
+    def handle_vat_report(self) -> None:
+        logging.info("Fetching Amazon VAT transactions report (covers all available EU stores).")
+        vat_segments = self.split_date_range(self.date_range, 30)
+        all_dfs = []
+
+        for start_date, end_date in vat_segments:
+            logging.info(f"Creating VAT transactions report for segment {end_date} - {start_date}.")
+            report_id = self.create_report(
+                start_date,
+                end_date,
+                "GET_VAT_TRANSACTION_DATA",
+                self.marketplace_ids[0]
+            )
+
+            if report_id:
+                df = self.poll_report_status_and_download(
+                    report_id,
+                    pd.DataFrame(),
+                    'vat_transactions_report.csv',
+                    is_xml=False,
+                    primary_keys=[]
+                )
+
+                if not df.empty:
+                    df.rename(columns=lambda x: self.shorten_column(x), inplace=True)
+                    df['extracted_at'] = datetime.utcnow().isoformat() + 'Z'
+                    all_dfs.append(df)
+                else:
+                    logging.warning(f"No VAT data for segment {end_date} - {start_date}.")
+
+            time.sleep(3)
+
+        if all_dfs:
+            combined_df = pd.concat(all_dfs, ignore_index=True)
+            combined_df.drop_duplicates(inplace=True)
+            self.process_data(combined_df, 'vat_transactions_report.csv', [])
+            logging.info(f"Total VAT transactions records processed: {len(combined_df)}")
+        else:
+            logging.warning("No Amazon VAT transactions data fetched.")
 
     def refresh_amazon_token(self):
         # Refresh the Amazon API token

@@ -46,6 +46,10 @@ It integrates with Keboola Connection (KBC) to automate API data retrieval and l
 | FBM Financial Events        | Paged retrieval of financial transactions                           |
 | Amazon Ads Reports          | Daily campaign reports for Sponsored Products/Brands/Display        |
 | Strategic Products Analysis | Sales rankings and performance data for specific ASINs              |
+| Seller Feedback             | Customer feedback ratings and comments per marketplace              |
+| Performance Report          | Seller performance metrics and account health status                |
+| Settlement Report           | Detailed settlement transactions with split-record deduplication    |
+| VAT Transactions Report     | EU VAT transaction data (DE, ES, IT, FR, UK) via SP-API            |
 | Execution Flags             | Toggle each extraction step                                          |
 | Multi-marketplace Support   | Configure multiple Amazon marketplaces simultaneously               |
 | Robust Error Handling       | Rate-limit backoff & detailed logging                               |
@@ -56,10 +60,14 @@ It integrates with Keboola Connection (KBC) to automate API data retrieval and l
 - **FBA Planning** `GET_FBA_INVENTORY_PLANNING_DATA`
 - **Ledger Detail** `GET_LEDGER_DETAIL_VIEW_DATA`
 - **Ledger Summary** `GET_LEDGER_SUMMARY_VIEW_DATA`
-- **Orders** `GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL`
+- **Orders** `GET_XML_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL`
 - **Returns** `GET_XML_RETURNS_DATA_BY_RETURN_DATE`
 - **Finances** `/finances/v0/financialEvents`
 - **Strategic Products** `/catalog/2022-04-01/items`
+- **Seller Feedback** `GET_SELLER_FEEDBACK_DATA`
+- **Performance Report** `GET_V2_SELLER_PERFORMANCE_REPORT`
+- **Settlement Report** `GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2`
+- **VAT Transactions Report** `GET_VAT_TRANSACTION_DATA`
 - **Ads Reporting** `POST /reporting/reports` & `GET /reporting/reports/{reportId}`
 
 ## Configuration
@@ -98,7 +106,11 @@ Set parameters in `config.json` or the KBC UI:
     "run_finances": true,
     "run_ads": true,
     "run_ledger": true,
-    "run_startegic_products": true
+    "run_strategic_products": true,
+    "run_seller_feedback": true,
+    "run_performance_report": true,
+    "run_settlement_report": true,
+    "run_vat_report": true
   }
 }
 ```
@@ -107,26 +119,34 @@ Set parameters in `config.json` or the KBC UI:
 
 - `run_inventory` – FBA inventory snapshots
 - `run_inventory_planning` – FBA inventory planning data
-- `run_orders`    – FBM orders
-- `run_returns`   – FBM returns
-- `run_finances`  – FBM financial events
-- `run_ads`       – Amazon Ads reports
-- `run_ledger`    – FBA ledger reports (detail and summary)
-- `run_startegic_products` – Strategic products sales rankings
+- `run_orders` – FBM orders
+- `run_returns` – FBM returns
+- `run_finances` – FBM financial events
+- `run_ads` – Amazon Ads reports
+- `run_ledger` – FBA ledger reports (detail and summary)
+- `run_strategic_products` – Strategic products sales rankings
+- `run_seller_feedback` – Seller feedback ratings and comments
+- `run_performance_report` – Seller performance metrics
+- `run_settlement_report` – Settlement transactions
+- `run_vat_report` – VAT transactions for EU marketplaces (DE, ES, IT, FR, UK)
 
 ## Output
 
-| Table Name                         | Description                          |
-| ---------------------------------- | ------------------------------------ |
-| `inventory.csv`                    | FBA inventory snapshots              |
-| `inventory_planning.csv`           | FBA inventory planning data          |
-| `inventory_ledger_detail.csv`      | FBA ledger detail view               |
-| `inventory_ledger_summary.csv`     | FBA ledger summary view              |
-| `orders.csv`                       | FBM orders                           |
-| `returns.csv`                      | FBM returns                          |
-| `finance.csv`                      | FBM financial events (see details below) |
-| `advertising.csv`                  | Amazon Ads campaign reports          |
-| `amazon_strategic_products_rank.csv` | Strategic products sales rankings |
+| Table Name                           | Description                                      |
+| ------------------------------------ | ------------------------------------------------ |
+| `inventory.csv`                      | FBA inventory snapshots                          |
+| `inventory_planning.csv`             | FBA inventory planning data                      |
+| `inventory_ledger_detail.csv`        | FBA ledger detail view                           |
+| `inventory_ledger_summary.csv`       | FBA ledger summary view                          |
+| `orders.csv`                         | FBM orders                                       |
+| `returns.csv`                        | FBM returns                                      |
+| `finance.csv`                        | FBM financial events (see details below)         |
+| `advertising.csv`                    | Amazon Ads campaign reports                      |
+| `amazon_strategic_products_rank.csv` | Strategic products sales rankings                |
+| `seller_feedback.csv`                | Customer feedback ratings and comments           |
+| `delivery_performance_raw.csv`       | Seller performance metrics and account health    |
+| `settlement_report.csv`              | Settlement transactions with deduplication       |
+| `vat_transactions_report.csv`        | VAT transactions for EU marketplaces             |
 
 ## Development
 

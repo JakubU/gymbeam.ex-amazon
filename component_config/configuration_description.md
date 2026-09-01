@@ -26,6 +26,10 @@ This component is designed to connect to Amazon's Selling Partner API and Amazon
   - `finance.csv` - FBM financial events (comprehensive transaction data with all charge/fee types)
   - `advertising.csv` - Amazon Ads campaign reports
   - `amazon_strategic_products_rank.csv` - Strategic products sales rankings
+  - `seller_feedback.csv` - Customer feedback ratings and comments
+  - `delivery_performance_raw.csv` - Seller performance metrics and account health
+  - `settlement_report.csv` - Settlement transactions with deduplication
+  - `vat_transactions_report.csv` - VAT transactions for EU marketplaces (DE, ES, IT, FR, UK)
 
 ### Parameters
 
@@ -47,7 +51,11 @@ This component is designed to connect to Amazon's Selling Partner API and Amazon
   - `run_finances` - FBM financial events
   - `run_ads` - Amazon Ads reports
   - `run_ledger` - FBA ledger reports (detail and summary)
-  - `run_startegic_products` - Strategic products sales rankings
+  - `run_strategic_products` - Strategic products sales rankings
+  - `run_seller_feedback` - Seller feedback ratings and comments
+  - `run_performance_report` - Seller performance metrics
+  - `run_settlement_report` - Settlement transactions
+  - `run_vat_report` - VAT transactions for EU marketplaces (DE, ES, IT, FR, UK)
 
 ### Obtaining API Credentials and Marketplace ID
 
@@ -327,7 +335,11 @@ Report Attributes:
       "run_finances": true,
       "run_ads": true,
       "run_ledger": true,
-      "run_startegic_products": true
+      "run_strategic_products": true,
+      "run_seller_feedback": true,
+      "run_performance_report": true,
+      "run_settlement_report": true,
+      "run_vat_report": true
     }
   }
 }
