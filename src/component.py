@@ -47,6 +47,7 @@ KEY_RUN_STRATEGIC_PRODUCTS = 'run_strategic_products'
 KEY_RUN_SELLER_FEEDBACK = 'run_seller_feedback'
 KEY_RUN_PERFORMANCE_REPORT = 'run_performance_report'
 KEY_RUN_SETTLEMENT_REPORT = 'run_settlement_report'
+KEY_RUN_INBOUND_SHIPMENTS = 'run_inbound_shipments'
 
 class Component(ComponentBase):
     def __init__(self):
@@ -95,6 +96,7 @@ class Component(ComponentBase):
         self.run_seller_feedback = exec_cfg.get(KEY_RUN_SELLER_FEEDBACK, True)
         self.run_performance_report = exec_cfg.get(KEY_RUN_PERFORMANCE_REPORT, True)
         self.run_settlement_report = exec_cfg.get(KEY_RUN_SETTLEMENT_REPORT, True)
+        self.run_inbound_shipments = exec_cfg.get(KEY_RUN_INBOUND_SHIPMENTS, False)
         # Ads credentials
         self.refresh_token_ads = params.get(KEY_REFRESH_TOKEN_ADS)
         self.app_id_ads = params.get(KEY_APP_ID_ADS)
@@ -140,6 +142,9 @@ class Component(ComponentBase):
         if self.run_settlement_report:
             logging.info('Executing Amazon settlement report...')
             self.handle_settlement_report()
+        if self.run_inbound_shipments:
+            logging.info('Executing FBA inbound shipments...')
+            self.handle_inbound_shipments()
         # FBA ledger reports (detail and summary) need correct date ordering
         if self.run_ledger:
             logging.info('Generating FBA ledger detail and summary view reports...')
@@ -673,6 +678,148 @@ class Component(ComponentBase):
                 primary_keys=['asin', 'marketplaceId', 'rank_type', 'title', 'extracted_at'], 
                 process_empty=True
             )
+
+    # Amazon does not expose FC country in the Inbound Shipments API response, so the country is
+    # inferred from the first 3 letters of the FC id (typically the nearest airport code).
+    # Unmapped prefixes fall back to 'EU/Other' in _get_country_by_fc_prefix rather than failing.
+    FC_PREFIX_COUNTRY_MAP = {
+        'EDE': 'DE', 'DUS': 'DE', 'FRA': 'DE', 'HAM': 'DE', 'STR': 'DE', 'MUC': 'DE', 'CGN': 'DE', 'XDT': 'DE',
+        'DTM': 'DE', 'LEJ': 'DE', 'HAJ': 'DE', 'BRE': 'DE', 'PAD': 'DE', 'BER': 'DE', 'XDE': 'DE', 'RLG': 'DE',
+        'XFR': 'DE', 'XFK': 'DE',
+        'WRO': 'PL', 'POZ': 'PL', 'KTW': 'PL', 'SZZ': 'PL', 'LCJ': 'PL', 'GDN': 'PL', 'XPL': 'PL',
+        'PRG': 'CZ', 'BRQ': 'CZ', 'XCZ': 'CZ',
+        'LYS': 'FR', 'MRS': 'FR', 'PAR': 'FR', 'LIL': 'FR', 'TLS': 'FR', 'BVA': 'FR', 'XCD': 'FR',
+        'MXP': 'IT', 'FCO': 'IT', 'LIN': 'IT', 'BGY': 'IT', 'PSA': 'IT', 'XIT': 'IT', 'BLQ': 'IT', 'TRN': 'IT',
+        'XLI': 'IT', 'XMP': 'IT',
+        'MAD': 'ES', 'BCN': 'ES', 'SVQ': 'ES', 'VLC': 'ES', 'XES': 'ES',
+        'LHR': 'UK', 'BHX': 'UK', 'MAN': 'UK', 'EDI': 'UK', 'GLA': 'UK', 'LTN': 'UK', 'CWL': 'UK',
+    }
+    INBOUND_SHIPMENT_STATUSES = [
+        'WORKING', 'READY_TO_SHIP', 'SHIPPED', 'IN_TRANSIT', 'CHECKED_IN', 'RECEIVING',
+        'DELIVERED', 'CLOSED', 'CANCELLED', 'DELETED', 'ERROR'
+    ]
+    MAX_SHIPMENT_LIST_PAGES = 200  # safety cap in case Amazon ever returns an endless NextToken chain
+
+    @classmethod
+    def _get_country_by_fc_prefix(cls, fc_id: str) -> str:
+        if not fc_id or fc_id == 'N/A' or len(fc_id) < 3:
+            return 'N/A'
+        return cls.FC_PREFIX_COUNTRY_MAP.get(fc_id[:3].upper(), 'EU/Other')
+
+    def _fetch_all_inbound_shipments(self, headers: dict) -> list:
+        """Fetch inbound shipments for every status in one date-ranged query, following NextToken pagination."""
+        url = "https://sellingpartnerapi-eu.amazon.com/fba/inbound/v0/shipments"
+        now = datetime.utcnow()
+        last_updated_after = (now - timedelta(days=self.date_range)).isoformat(timespec='milliseconds') + 'Z'
+        last_updated_before = now.isoformat(timespec='milliseconds') + 'Z'
+        logging.info(f"Querying shipments last updated between {last_updated_after} and {last_updated_before}.")
+
+        params = {
+            'QueryType': 'DATE_RANGE',
+            'LastUpdatedAfter': last_updated_after,
+            'LastUpdatedBefore': last_updated_before,
+            'ShipmentStatusList': ','.join(self.INBOUND_SHIPMENT_STATUSES),
+            # On the EU endpoint, inbound shipments span the whole EU region regardless of which
+            # marketplace is passed here, so a single (the first configured) marketplace is enough -
+            # confirmed by test runs returning shipments to both DE and IT FCs from one call.
+            'MarketplaceId': self.marketplace_ids[0]
+        }
+
+        all_shipments = []
+        for page in range(1, self.MAX_SHIPMENT_LIST_PAGES + 1):
+            response = self.controlled_request('get', url, headers=headers, params=params)
+            if not response or response.status_code != 200:
+                logging.error(
+                    f"Failed to fetch shipments page {page} "
+                    f"({response.status_code if response else 'No response'}): "
+                    f"{response.text if response else ''}"
+                )
+                break
+
+            payload = response.json().get('payload', {})
+            all_shipments.extend(payload.get('ShipmentData', []))
+            next_token = payload.get('NextToken')
+            if not next_token:
+                logging.info(f"Fetched {len(all_shipments)} shipments across {page} page(s).")
+                break
+            # NextToken alone re-runs the original query server-side; other params must be dropped.
+            params = {'QueryType': 'NEXT_TOKEN', 'NextToken': next_token}
+        else:
+            logging.warning(
+                f"Reached MAX_SHIPMENT_LIST_PAGES ({self.MAX_SHIPMENT_LIST_PAGES}), pagination may be incomplete."
+            )
+
+        return all_shipments
+
+    def handle_inbound_shipments(self) -> None:
+        """Fetch FBA inbound shipments (all statuses) and their items; estimate country from the FC prefix."""
+        logging.info(f"Fetching FBA inbound shipments for the last {self.date_range} day(s), all statuses.")
+        headers = {
+            'x-amz-access-token': self.access_token,
+            'Content-Type': 'application/json'
+        }
+
+        all_shipments = self._fetch_all_inbound_shipments(headers)
+
+        status_counts = {}
+        for shipment in all_shipments:
+            status = shipment.get('ShipmentStatus', 'UNKNOWN')
+            status_counts[status] = status_counts.get(status, 0) + 1
+        logging.info(f"Shipment status breakdown: {status_counts}")
+
+        export_data = []
+        items_fetch_failures = 0
+
+        for index, shipment in enumerate(all_shipments, start=1):
+            shipment_id = shipment.get('ShipmentId')
+            status = shipment.get('ShipmentStatus', 'UNKNOWN')
+            destination_fc = shipment.get('DestinationFulfillmentCenterId', 'N/A')
+            country = self._get_country_by_fc_prefix(destination_fc)
+
+            url_items = f"https://sellingpartnerapi-eu.amazon.com/fba/inbound/v0/shipments/{shipment_id}/items"
+            items_response = self.controlled_request(
+                'get', url_items, headers=headers, params={'MarketplaceId': self.marketplace_ids[0]}
+            )
+
+            if items_response and items_response.status_code == 200:
+                items = items_response.json().get('payload', {}).get('ItemData', [])
+                for item in items:
+                    units_expected = int(item.get('QuantityShipped', 0))
+                    units_located = int(item.get('QuantityReceived', 0))
+                    export_data.append({
+                        'shipment_id': shipment_id,
+                        'shipment_status': status,
+                        'destination_fc': destination_fc,
+                        'estimated_country': country,
+                        'seller_sku': item.get('SellerSKU', 'N/A'),
+                        'fnsku': item.get('FulfillmentNetworkSKU', 'N/A'),
+                        'units_expected': units_expected,
+                        'units_located': units_located,
+                        'on_way': units_expected - units_located,
+                        'extracted_at': datetime.utcnow().isoformat() + 'Z'
+                    })
+            else:
+                items_fetch_failures += 1
+                logging.error(
+                    f"Failed to fetch items for shipment {shipment_id} "
+                    f"({items_response.status_code if items_response else 'No response'}): "
+                    f"{items_response.text if items_response else ''}"
+                )
+
+            if index % 50 == 0 or index == len(all_shipments):
+                logging.info(f"Processed items for {index}/{len(all_shipments)} shipments.")
+
+            time.sleep(0.5)  # throttle to the SP-API rate limit for GetShipmentItems (2 req/s)
+
+        if items_fetch_failures:
+            logging.warning(f"Failed to fetch items for {items_fetch_failures} out of {len(all_shipments)} shipments.")
+
+        if export_data:
+            df = pd.DataFrame(export_data)
+            self.process_data(df, 'inbound_shipments.csv', ['shipment_id', 'seller_sku'])
+            logging.info(f"Total inbound shipment records processed: {len(df)}")
+        else:
+            logging.warning("No FBA inbound shipment data fetched.")
 
     def handle_settlement_report(self) -> None:
         """
