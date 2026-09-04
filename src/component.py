@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 from datetime import datetime, timedelta
 import pandas as pd
@@ -18,6 +19,21 @@ import gc
 
 # Suppress FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+
+def _load_fc_country_mapping() -> dict:
+    # Amazon does not expose FC country in the Inbound Shipments API response, so the country is
+    # inferred from the first 3 letters of the FC id (typically the nearest airport code).
+    # Unmapped prefixes fall back to 'EU/Other' (see Component._get_country_by_fc_prefix) rather than failing.
+    # Known gap: the Netherlands (NL) marketplace is configured but has no FC prefixes mapped here yet -
+    # public FC code lists for NL were not reliable enough to trust. Add them once a real NL shipment
+    # surfaces 'EU/Other' in the output, the same way XCD (FR) and XMP (IT) were added.
+    mapping_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fc_country_mapping.json')
+    with open(mapping_path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+FC_PREFIX_COUNTRY_MAP = _load_fc_country_mapping()
 
 # Configuration variables for API access and other settingss
 KEY_REFRESH_TOKEN = '#refresh_token'
@@ -679,32 +695,17 @@ class Component(ComponentBase):
                 process_empty=True
             )
 
-    # Amazon does not expose FC country in the Inbound Shipments API response, so the country is
-    # inferred from the first 3 letters of the FC id (typically the nearest airport code).
-    # Unmapped prefixes fall back to 'EU/Other' in _get_country_by_fc_prefix rather than failing.
-    FC_PREFIX_COUNTRY_MAP = {
-        'EDE': 'DE', 'DUS': 'DE', 'FRA': 'DE', 'HAM': 'DE', 'STR': 'DE', 'MUC': 'DE', 'CGN': 'DE', 'XDT': 'DE',
-        'DTM': 'DE', 'LEJ': 'DE', 'HAJ': 'DE', 'BRE': 'DE', 'PAD': 'DE', 'BER': 'DE', 'XDE': 'DE', 'RLG': 'DE',
-        'XFR': 'DE', 'XFK': 'DE',
-        'WRO': 'PL', 'POZ': 'PL', 'KTW': 'PL', 'SZZ': 'PL', 'LCJ': 'PL', 'GDN': 'PL', 'XPL': 'PL',
-        'PRG': 'CZ', 'BRQ': 'CZ', 'XCZ': 'CZ',
-        'LYS': 'FR', 'MRS': 'FR', 'PAR': 'FR', 'LIL': 'FR', 'TLS': 'FR', 'BVA': 'FR', 'XCD': 'FR',
-        'MXP': 'IT', 'FCO': 'IT', 'LIN': 'IT', 'BGY': 'IT', 'PSA': 'IT', 'XIT': 'IT', 'BLQ': 'IT', 'TRN': 'IT',
-        'XLI': 'IT', 'XMP': 'IT',
-        'MAD': 'ES', 'BCN': 'ES', 'SVQ': 'ES', 'VLC': 'ES', 'XES': 'ES',
-        'LHR': 'UK', 'BHX': 'UK', 'MAN': 'UK', 'EDI': 'UK', 'GLA': 'UK', 'LTN': 'UK', 'CWL': 'UK',
-    }
     INBOUND_SHIPMENT_STATUSES = [
         'WORKING', 'READY_TO_SHIP', 'SHIPPED', 'IN_TRANSIT', 'CHECKED_IN', 'RECEIVING',
         'DELIVERED', 'CLOSED', 'CANCELLED', 'DELETED', 'ERROR'
     ]
     MAX_SHIPMENT_LIST_PAGES = 200  # safety cap in case Amazon ever returns an endless NextToken chain
 
-    @classmethod
-    def _get_country_by_fc_prefix(cls, fc_id: str) -> str:
+    @staticmethod
+    def _get_country_by_fc_prefix(fc_id: str) -> str:
         if not fc_id or fc_id == 'N/A' or len(fc_id) < 3:
             return 'N/A'
-        return cls.FC_PREFIX_COUNTRY_MAP.get(fc_id[:3].upper(), 'EU/Other')
+        return FC_PREFIX_COUNTRY_MAP.get(fc_id[:3].upper(), 'EU/Other')
 
     def _fetch_all_inbound_shipments(self, headers: dict) -> list:
         """Fetch inbound shipments for every status in one date-ranged query, following NextToken pagination."""

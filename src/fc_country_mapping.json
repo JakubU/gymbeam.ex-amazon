@@ -1,0 +1,12 @@
+{
+  "EDE": "DE", "DUS": "DE", "FRA": "DE", "HAM": "DE", "STR": "DE", "MUC": "DE", "CGN": "DE", "XDT": "DE",
+  "DTM": "DE", "LEJ": "DE", "HAJ": "DE", "BRE": "DE", "PAD": "DE", "BER": "DE", "XDE": "DE", "RLG": "DE",
+  "XFR": "DE", "XFK": "DE",
+  "WRO": "PL", "POZ": "PL", "KTW": "PL", "SZZ": "PL", "LCJ": "PL", "GDN": "PL", "XPL": "PL",
+  "PRG": "CZ", "BRQ": "CZ", "XCZ": "CZ",
+  "LYS": "FR", "MRS": "FR", "PAR": "FR", "LIL": "FR", "TLS": "FR", "BVA": "FR", "XCD": "FR",
+  "MXP": "IT", "FCO": "IT", "LIN": "IT", "BGY": "IT", "PSA": "IT", "XIT": "IT", "BLQ": "IT", "TRN": "IT",
+  "XLI": "IT", "XMP": "IT",
+  "MAD": "ES", "BCN": "ES", "SVQ": "ES", "VLC": "ES", "XES": "ES",
+  "LHR": "UK", "BHX": "UK", "MAN": "UK", "EDI": "UK", "GLA": "UK", "LTN": "UK", "CWL": "UK"
+}
