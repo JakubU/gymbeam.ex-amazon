@@ -21,6 +21,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
 INPUT_TABLE_FC_COUNTRY_MAPPING = 'fc_country_mapping.csv'
+INPUT_TABLE_STRATEGIC_PRODUCTS = 'amazon_full_load.csv'
 INBOUND_SHIPMENT_STATUSES = [
     'WORKING', 'READY_TO_SHIP', 'SHIPPED', 'IN_TRANSIT', 'CHECKED_IN', 'RECEIVING',
     'DELIVERED', 'CLOSED', 'CANCELLED', 'DELETED', 'ERROR'
@@ -590,9 +591,9 @@ class Component(ComponentBase):
         all_dfs = []
 
         # Fetch input table with ASIN for Amazon products
-        input_tables = self.get_input_tables_definitions()
-
-        strategic_products = self.listings_extract(table_path=input_tables[0].full_path)
+        strategic_products = self.listings_extract(
+            table_path=self._get_input_table_path(INPUT_TABLE_STRATEGIC_PRODUCTS)
+        )
 
         # Outer loop for each marketplace
         for marketplace_data in self.marketplaces_cfg:
@@ -687,22 +688,30 @@ class Component(ComponentBase):
                 process_empty=True
             )
 
+    def _get_input_table_path(self, table_name: str) -> str:
+        """
+        Find a mapped Keboola input table by its exact destination file name and return its local path.
+        Tables are looked up by name rather than by list position/index, since more than one input
+        table can be mapped for a single component run (e.g. fc_country_mapping.csv and
+        amazon_full_load.csv) and their order in get_input_tables_definitions() is not guaranteed.
+        """
+        input_tables = self.get_input_tables_definitions()
+        table = next((t for t in input_tables if t.name == table_name), None)
+        if table is None:
+            available = [t.name for t in input_tables]
+            raise Exception(
+                f"Input table '{table_name}' not found (available: {available}). "
+                f"Map it as an input table with destination file name '{table_name}'."
+            )
+        return table.full_path
+
     def _load_fc_country_mapping(self) -> dict:
         """
         Load the FC-prefix-to-country mapping from a Keboola input table (columns 'fc_prefix',
         'country_code'), so it can be edited in Storage without releasing a new component version.
-        Same pattern as listings_extract() for handle_strategic_products().
         """
-        input_tables = self.get_input_tables_definitions()
-        mapping_table = next((t for t in input_tables if t.name == INPUT_TABLE_FC_COUNTRY_MAPPING), None)
-        if mapping_table is None:
-            available = [t.name for t in input_tables]
-            raise Exception(
-                f"Input table '{INPUT_TABLE_FC_COUNTRY_MAPPING}' not found (available: {available}). "
-                f"Map a table with columns 'fc_prefix' and 'country_code' as an input table to run "
-                f"FBA inbound shipments."
-            )
-        mapping_df = pd.read_csv(mapping_table.full_path)
+        mapping_path = self._get_input_table_path(INPUT_TABLE_FC_COUNTRY_MAPPING)
+        mapping_df = pd.read_csv(mapping_path)
         return {str(row.fc_prefix).upper(): row.country_code for row in mapping_df.itertuples()}
 
     @staticmethod
