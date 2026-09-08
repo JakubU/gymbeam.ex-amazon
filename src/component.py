@@ -20,8 +20,8 @@ import gc
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-INPUT_TABLE_FC_COUNTRY_MAPPING = 'fc_country_mapping.csv'
-INPUT_TABLE_STRATEGIC_PRODUCTS = 'amazon_full_load.csv'
+INPUT_TABLE_FC_COUNTRY_MAPPING = 'fc_country_mapping'
+INPUT_TABLE_STRATEGIC_PRODUCTS = 'amazon_full_load'
 INBOUND_SHIPMENT_STATUSES = [
     'WORKING', 'READY_TO_SHIP', 'SHIPPED', 'IN_TRANSIT', 'CHECKED_IN', 'RECEIVING',
     'DELIVERED', 'CLOSED', 'CANCELLED', 'DELETED', 'ERROR'
@@ -690,10 +690,16 @@ class Component(ComponentBase):
 
     def _get_input_table_path(self, table_name: str) -> str:
         """
-        Find a mapped Keboola input table by its exact destination file name and return its local path.
+        Find a mapped Keboola input table by name and return its local path.
         Tables are looked up by name rather than by list position/index, since more than one input
-        table can be mapped for a single component run (e.g. fc_country_mapping.csv and
-        amazon_full_load.csv) and their order in get_input_tables_definitions() is not guaranteed.
+        table can be mapped for a single component run (e.g. fc_country_mapping and
+        amazon_full_load) and their order in get_input_tables_definitions() is not guaranteed.
+
+        Note: in production, Keboola names an input table after its Storage table id, without any
+        file extension (e.g. 'fc_country_mapping'), regardless of the destination file name set in
+        Input mapping - confirmed via the 'available' names in a live job's error log. A bare local
+        CSV with no .manifest file (as used in local/dev testing) instead falls back to its own file
+        name including the extension, which does not reproduce this and let the mismatch slip through.
         """
         input_tables = self.get_input_tables_definitions()
         table = next((t for t in input_tables if t.name == table_name), None)
@@ -701,7 +707,7 @@ class Component(ComponentBase):
             available = [t.name for t in input_tables]
             message = (
                 f"Input table '{table_name}' not found (available: {available}). "
-                f"Map it as an input table with destination file name '{table_name}'."
+                f"Map it as an input table named '{table_name}' (no file extension)."
             )
             logging.error(message)
             raise Exception(message)
