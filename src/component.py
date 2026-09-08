@@ -699,10 +699,13 @@ class Component(ComponentBase):
         table = next((t for t in input_tables if t.name == table_name), None)
         if table is None:
             available = [t.name for t in input_tables]
-            raise Exception(
+            message = (
                 f"Input table '{table_name}' not found (available: {available}). "
                 f"Map it as an input table with destination file name '{table_name}'."
             )
+            logging.error(message)
+            raise Exception(message)
+        logging.info(f"Resolved input table '{table_name}' to path: {table.full_path}")
         return table.full_path
 
     def _load_fc_country_mapping(self) -> dict:
@@ -712,7 +715,15 @@ class Component(ComponentBase):
         """
         mapping_path = self._get_input_table_path(INPUT_TABLE_FC_COUNTRY_MAPPING)
         mapping_df = pd.read_csv(mapping_path)
-        return {str(row.fc_prefix).upper(): row.country_code for row in mapping_df.itertuples()}
+        logging.info(f"Loaded fc_country_mapping table: {len(mapping_df)} rows, columns: {list(mapping_df.columns)}")
+        try:
+            return {str(row.fc_prefix).upper(): row.country_code for row in mapping_df.itertuples()}
+        except AttributeError as e:
+            logging.error(
+                f"fc_country_mapping table is missing an expected column ('fc_prefix' or 'country_code'). "
+                f"Actual columns found: {list(mapping_df.columns)}. Error: {e}"
+            )
+            raise
 
     @staticmethod
     def _get_country_by_fc_prefix(fc_id: str, country_map: dict) -> str:
